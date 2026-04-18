@@ -1,0 +1,66 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowDynamoDBAccessViaEndpoint",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": [
+        "dynamodb:GetItem",
+        "dynamodb:PutItem",
+        "dynamodb:Query",
+        "dynamodb:Scan",
+        "dynamodb:UpdateItem",
+        "dynamodb:DeleteItem"
+      ],
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/Users",
+        "arn:aws:dynamodb:*:*:table/Users/index/*"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:sourceVpce": "vpce-1234567890abcdef0"
+        }
+      }
+    },
+    {
+      "Sid": "DenyAccessFromInternet",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "dynamodb:*",
+      "Resource": [
+        "arn:aws:dynamodb:*:*:table/Users",
+        "arn:aws:dynamodb:*:*:table/Users/index/*"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:ViaAWSService": "false"
+        },
+        "Not": {
+          "StringEquals": {
+            "aws:sourceVpce": "vpce-1234567890abcdef0"
+          }
+        }
+      }
+    },
+    {
+      "Sid": "AllowS3AccessViaEndpoint",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::mi-bucket-privado/*",
+        "arn:aws:s3:::mi-bucket-privado"
+      ],
+      "Condition": {
+        "StringEquals": {
+          "aws:sourceVpce": "vpce-1234567890abcdef0"
+        }
+      }
+    }
+  ]
+}

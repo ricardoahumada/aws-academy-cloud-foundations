@@ -1,0 +1,47 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EnforceHTTPS",
+      "Effect": "Deny",
+      "Principal": "*",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::mi-bucket-cifrado/*",
+        "arn:aws:s3:::mi-bucket-cifrado"
+      ],
+      "Condition": {
+        "Bool": {
+          "aws:SecureTransport": "false"
+        }
+      }
+    },
+    {
+      "Sid": "AllowKMSDecrypt",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::123456789012:user/desarrollador"
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::mi-bucket-cifrado/*"
+    },
+    {
+      "Sid": "RestrictByIP",
+      "Effect": "Allow",
+      "Principal": "*",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::mi-bucket-cifrado/*",
+      "Condition": {
+        "IpAddress": {
+          "aws:SourceIp": [
+            "10.0.0.0/8",
+            "172.16.0.0/12"
+          ]
+        }
+      }
+    }
+  ]
+}

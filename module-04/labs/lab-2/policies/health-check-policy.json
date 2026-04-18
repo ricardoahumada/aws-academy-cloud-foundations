@@ -1,0 +1,52 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AllowHealthCheckActions",
+      "Effect": "Allow",
+      "Action": [
+        "route53:CreateHealthCheck",
+        "route53:UpdateHealthCheck",
+        "route53:DeleteHealthCheck",
+        "route53:GetHealthCheck",
+        "route53:GetHealthCheckStatus",
+        "route53:GetHealthCheckers"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "AllowRecordSetManagement",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ChangeResourceRecordSets",
+        "route53:ListResourceRecordSets"
+      ],
+      "Resource": "arn:aws:route53:::hostedzone/Z1234567890ABC"
+    },
+    {
+      "Sid": "AllowHealthCheckTagging",
+      "Effect": "Allow",
+      "Action": [
+        "route53:ListTagsForResources",
+        "route53:TagsResources"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "route53:ResourceTag/Environment": "production"
+        }
+      }
+    },
+    {
+      "Sid": "DenyHealthCheckDeletion",
+      "Effect": "Deny",
+      "Action": "route53:DeleteHealthCheck",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "aws:ResourceTag/Protected": "true"
+        }
+      }
+    }
+  ]
+}

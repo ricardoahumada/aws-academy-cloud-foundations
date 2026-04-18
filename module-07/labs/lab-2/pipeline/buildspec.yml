@@ -1,0 +1,143 @@
+version: 0.2
+
+# ============================================
+# BuildSpec - Lab 7.2 CI/CD Pipeline
+# CodePipeline: GitHub → CodeBuild → ECS
+# ============================================
+
+env:
+  variables:
+    AWS_REGION: us-east-1
+    ECR_REPOSITORY_NAME: my-webapp
+    ECS_CLUSTER_NAME: my-cluster
+    ECS_SERVICE_NAME: my-service
+    ECS_TASK_DEFINITION: task-def.json
+
+  parameter-store:
+    # Parámetros seguros desde Systems Manager Parameter Store
+    DOCKER_HUB_TOKEN: /prod/docker-hub/token
+
+phases:
+  # ============================================
+  # Fase 1: Instalación de dependencias
+  # ============================================
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - echo "=== Instalando dependencias ==="
+      - apt-get update -y
+      - apt-get install -y python3-pip jq unzip
+      - pip3 install --upgrade awscli
+      # Instalar Amazon ECS CLI
+      - curl -s https://amazon-ecs-cli.s3.amazonaws.com/ecs-cli-linux-amd64-latest -o /tmp/ecs-cli
+      - chmod +x /tmp/ecs-cli
+      - mv /tmp/ecs-cli /usr/local/bin/ecs-cli
+
+  # ============================================
+  # Fase 2: Pre-build - Preparar contexto
+  # ============================================
+  pre_build:
+    commands:
+      - echo "=== Pre-build: Autenticando en ECR ==="
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+      - echo "ECR Registry: ${ECR_REGISTRY}"
+      
+      # Autenticarse en ECR
+      - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REGISTRY}
+      
+      - echo "=== Verificando ECR Repository ==="
+      - aws ecr describe-repositories --repository-names ${ECR_REPOSITORY_NAME} --region ${AWS_REGION} || \
+        aws ecr create-repository --repository-name ${ECR_REPOSITORY_NAME} --region ${AWS_REGION}
+
+  # ============================================
+  # Fase 3: Build - Construir imagen Docker
+  # ============================================
+  build:
+    commands:
+      - echo "=== Construyendo imagen Docker ==="
+      - cd app
+      - IMAGE_TAG=${CODEBUILD_BUILD_NUMBER}
+      - FULL_IMAGE_NAME=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}
+      - FULL_IMAGE_NAME_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:latest
+      
+      # Construir imagen
+      - docker build -t ${ECR_REPOSITORY_NAME}:${IMAGE_TAG} --build-arg NODE_ENV=production .
+      - docker tag ${ECR_REPOSITORY_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME}
+      - docker tag ${ECR_REPOSITORY_NAME}:${IMAGE_TAG} ${FULL_IMAGE_NAME_LATEST}
+      
+      # Mostrar imagen construida
+      - docker images | grep ${ECR_REPOSITORY_NAME}
+
+  # ============================================
+  # Fase 4: Post-build - Push y deploy
+  # ============================================
+  post_build:
+    commands:
+      - echo "=== Post-build: Push a ECR ==="
+      - IMAGE_TAG=${CODEBUILD_BUILD_NUMBER}
+      - FULL_IMAGE_NAME=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}
+      - FULL_IMAGE_NAME_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:latest
+      
+      # Push imágenes
+      - docker push ${FULL_IMAGE_NAME}
+      - docker push ${FULL_IMAGE_NAME_LATEST}
+      
+      - echo "=== Actualizando Task Definition ==="
+      # Obtener task definition actual
+      - TASK_DEF=$(aws ecs describe-task-definition --task-definition ${ECS_TASK_DEFINITION} --region ${AWS_REGION})
+      - TASK_FAMILY=$(echo ${TASK_DEF} | jq -r '.taskDefinition.family')
+      - TASK_REVISION=$(echo ${TASK_DEF} | jq -r '.taskDefinition.taskDefinitionArn')
+      
+      # Crear nueva revision
+      - NEW_TASK_DEF=$(aws ecs register-task-definition --region ${AWS_REGION} \
+          --family ${TASK_FAMILY} \
+          --container-definitions "[$(echo ${TASK_DEF} | jq '.taskDefinition.containerDefinitions[0] | .image=\"${FULL_IMAGE_NAME}\" | .logConfiguration.options[\"awslogs-stream-prefix\"]=\"${TASK_FAMILY}\"')]" \
+          --output json)
+      
+      - NEW_TASK_ARN=$(echo ${NEW_TASK_DEF} | jq -r '.taskDefinition.taskDefinitionArn')
+      - NEW_TASK_REVISION=$(echo ${NEW_TASK_DEF} | jq -r '.taskDefinition.revision')
+      
+      - echo "Nueva Task Definition: ${NEW_TASK_ARN}"
+      
+      # Actualizar servicio ECS
+      - echo "=== Actualizando Servicio ECS ==="
+      - aws ecs update-service \
+          --cluster ${ECS_CLUSTER_NAME} \
+          --service ${ECS_SERVICE_NAME} \
+          --task-definition ${TASK_FAMILY} \
+          --force-new-deployment \
+          --region ${AWS_REGION} \
+          --output json
+      
+      # Esperar a que el deployment complete
+      - echo "=== Esperando deployment ==="
+      - aws ecs wait services-stable \
+          --cluster ${ECS_CLUSTER_NAME} \
+          --services ${ECS_SERVICE_NAME} \
+          --region ${AWS_REGION}
+      
+      - echo "=== Deployment completado ==="
+      - aws ecs describe-services \
+          --cluster ${ECS_CLUSTER_NAME} \
+          --services ${ECS_SERVICE_NAME} \
+          --region ${AWS_REGION} \
+          --query 'services[0].deployments'
+
+# ============================================
+# Artefacts - Guardar para siguientes stages
+# ============================================
+artifacts:
+  files:
+    - '**/*'
+  name: source-build-output
+  discard-paths: yes
+
+# ============================================
+# Logs - Configurar CloudWatch Logs
+# ============================================
+logs:
+  cloudwatch:
+    log-group: /aws/codebuild/${PROJECT_NAME}
+    stream-prefix: build
