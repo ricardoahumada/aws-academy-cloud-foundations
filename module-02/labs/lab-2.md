@@ -168,14 +168,25 @@ Lanzar instancias EC2 utilizando diferentes métodos (Launch Instance directo y 
 4. **Configurar Storage:**
    - **Root volume:** 8 GiB, gp3
 
-5. **Expandir detalles de Advanced Network:**
-   - **User data:** Dejar vacío (no necesita script)
+5. **Configurar acceso por contraseña:**
+   - Expandir **Advanced details**
+   - En **User data**, agregar el siguiente script:
+     ```bash
+     #!/bin/bash
+     # Habilitar autenticación por contraseña para ec2-user
+     echo "ec2-user:LabPassword123" | chpasswd
+     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     systemctl restart sshd
+     ```
 
 6. Hacer clic en **Launch instance**
 
 7. **Verificación:**
    - Confirmar que la instancia aparece en la lista con estado `running`
    - Anotar la **IPv4 pública** del bastion (ej: `54.123.45.67`)
+
+**Credenciales de acceso:** Usuario `ec2-user`, contraseña `LabPassword123`
 
 ---
 
@@ -193,11 +204,25 @@ Lanzar instancias EC2 utilizando diferentes métodos (Launch Instance directo y 
    - **Subnet:** `lab02-subnet-publica` (seleccionar del dropdown)
    - **Key pair:** `lab02-keypair`
 
-4. Hacer clic en **Launch instance**
+4. **Para acceso por contraseña (opcional):**
+   - Editar el Launch Template `lab02-lt-webserver` y prepend al User data existente:
+     ```bash
+     #!/bin/bash
+     # Habilitar autenticación por contraseña para ec2-user
+     echo "ec2-user:LabPassword123" | chpasswd
+     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     systemctl restart sshd
+     ```
+   - relanzar la instancia desde el template modificado
 
-5. **Verificación:**
+5. Hacer clic en **Launch instance**
+
+6. **Verificación:**
    - Confirmar que `lab02-webserver` aparece con estado `running`
    - Anotar la **IPv4 pública** del web server
+
+**Nota:** El acceso por contraseña usa las mismas credenciales: `ec2-user` / `LabPassword123`
 
 ---
 

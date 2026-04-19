@@ -2,13 +2,13 @@
 
 ## Objetivo
 
-Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y privadas, Internet Gateway, NAT Gateway y Security Groups que permitan una arquitectura de red segura y funcional en AWS.
+Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y privadas, Internet Gateway, NAT Gateway, Security Groups y Network ACLs (NACLs) que permitan una arquitectura de red segura y funcional en AWS.
 
 ---
 
 ## Duración Estimada
 
-**90 minutos**
+**110 minutos**
 
 ---
 
@@ -34,24 +34,24 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        VPC (10.0.0.0/16)                    │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              Subnet Pública (10.0.1.0/24)            │   │
-│  │   ┌─────────────┐  ┌─────────────┐                 │   │
-│  │   │  EC2 Bastion │  │ Application │                 │   │
-│  │   └─────────────┘  └─────────────┘                 │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────┐   │
-│  │              Subnet Privada (10.0.2.0/24)            │   │
-│  │   ┌─────────────┐  ┌─────────────┐                 │   │
-│  │   │  RDS (DB)    │  │  EC2 (App)   │                 │   │
-│  │   └─────────────┘  └─────────────┘                 │   │
-│  └─────────────────────────────────────────────────────┘   │
-│                                                              │
-│  ┌──────────────┐          ┌──────────────┐                │
-│  │ Internet GW  │          │   NAT GW     │                │
-│  └──────────────┘          └──────────────┘                │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              Subnet Pública (10.0.1.0/24)           │    │
+│  │   ┌──────────────┐  ┌─────────────┐                 │    │
+│  │   │  EC2 Bastion │  │ Application │                 │    │
+│  │   └──────────────┘  └─────────────┘                 │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │              Subnet Privada (10.0.2.0/24)           │    │
+│  │   ┌──────────────┐  ┌──────────────┐                │    │
+│  │   │  RDS (DB)    │  │  EC2 (App)   │                │    │
+│  │   └──────────────┘  └──────────────┘                │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                             │
+│  ┌──────────────┐          ┌──────────────┐                 │
+│  │ Internet GW  │          │   NAT GW     │                 │
+│  └──────────────┘          └──────────────┘                 │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -242,7 +242,7 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
 
 2. Hacer clic en **Create security group**
 
-3. Configurar基本信息:
+3. Configurar información básica:
    - **Security group name:** `lab02-sg-bastion`
    - **Description:** Security group para bastion host
    - **VPC:** Seleccionar `lab02-vpc`
@@ -285,6 +285,122 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
 
 ---
 
+### Paso 6.5: Crear Network ACLs (NACLs)
+
+**Tiempo estimado:** 15 minutos
+
+Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel de subnet. A diferencia de los Security Groups (stateful), los NACLs son **stateless**, lo que significa que debes permitir explícitamente tanto el tráfico de entrada como el de salida para las respuestas.
+
+#### 6.5.1 Conceptos Fundamentales
+
+| Característica | Security Group | NACL |
+|----------------|----------------|------|
+| **Estado** | Stateful (respuesta automática) | Stateless (requiere regla explícita) |
+| **Alcance** | Instancia | Subnet |
+| **Reglas** | Solo permit | Permit y Deny |
+| **Evaluación** | Todas las reglas se evaluan | En orden numérico, primera coincidencia |
+| **Default** | Deny all (sin reglas) | Allow all (nuevos NACLs) |
+
+#### 6.5.2 Crear NACL para Subnet Privada
+
+1. En el menú lateral de VPC Dashboard, seleccionar **Network ACLs**
+
+2. Hacer clic en **Create network ACL**
+
+3. Configurar:
+   - **Name tag:** `lab02-nacl-privada`
+   - **VPC:** Seleccionar `lab02-vpc`
+
+4. Hacer clic en **Create network ACL**
+
+#### 6.5.3 Asociar NACL a la Subnet Privada
+
+1. Seleccionar el NACL recién creado `lab02-nacl-privada`
+
+2. Ir a la pestaña **Subnet associations**
+
+3. Hacer clic en **Edit subnet associations**
+
+4. Seleccionar `lab02-subnet-privada`
+
+5. Hacer clic en **Save associations**
+
+**Verificación:** La subnet `lab02-subnet-privada` aparece asociada al NACL `lab02-nacl-privada`
+
+#### 6.5.4 Configurar Reglas de Entrada
+
+1. Con el NACL `lab02-nacl-privada` seleccionado, ir a la pestaña **Inbound rules**
+
+2. Hacer clic en **Edit inbound rules**
+
+3. **Agregar regla para SSH (respuesta):**
+   - **Rule number:** `100`
+   - **Type:** Custom TCP
+   - **Protocol:** TCP (6)
+   - **Port range:** `1024-65535` (puertos efímeros)
+   - **Source:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
+
+4. **Agregar regla para HTTP (respuesta):**
+   - **Rule number:** `110`
+   - **Type:** Custom TCP
+   - **Protocol:** TCP
+   - **Port range:** `1024-65535`
+   - **Source:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
+
+5. **Agregar regla para HTTPS (respuesta):**
+   - **Rule number:** `120`
+   - **Type:** Custom TCP
+   - **Protocol:** TCP
+   - **Port range:** `1024-65535`
+   - **Source:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
+
+6. Hacer clic en **Save changes**
+
+#### 6.5.5 Configurar Reglas de Salida
+
+1. Ir a la pestaña **Outbound rules**
+
+2. Hacer clic en **Edit outbound rules**
+
+3. **Agregar regla para todo el tráfico saliente:**
+   - **Rule number:** `100`
+   - **Type:** All Traffic
+   - **Protocol:** All
+   - **Port range:** All
+   - **Destination:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
+
+4. Hacer clic en **Save changes**
+
+**Nota importante:** Los NACLs evaluados en orden numérico. Las reglas con números menores se evalúan primero. El número 100 se evalúa antes que el 110 o 120.
+
+#### 6.5.6 Comparar Comportamiento: Security Groups vs NACLs
+
+Para demostrar la diferencia entre stateful (SG) y stateless (NACL):
+
+1. **Security Group (Stateful):**
+   - Si permites SSH entrante desde `0.0.0.0/0`, la respuesta automática está permitida sin regla adicional
+   - El return traffic es permitido automáticamente por el estado de la conexión
+
+2. **NACL (Stateless):**
+   - Debes permitir explícitamente el tráfico de respuesta
+   - SSH usa puertos efímeros (1024-65535) para la respuesta
+   - Sin la regla de entrada para puertos efémeros, la respuesta sería denegada
+
+**Prueba de conectividad:**
+- Verificar que las instancias en la subnet privada pueden acceder a Internet vía NAT Gateway
+- El NAT Gateway ya tiene sus propias reglas de SG que permiten el tráfico
+
+**Verificación:**
+- `lab02-nacl-privada` está asociada a `lab02-subnet-privada`
+- Las reglas de entrada permiten puertos efímeros desde `0.0.0.0/0`
+- Las reglas de salida permiten todo el tráfico saliente
+
+---
+
 ### Paso 7: Verificación de la Arquitectura
 
 **Tiempo estimado:** 10 minutos
@@ -308,7 +424,21 @@ Para validar que la arquitectura funciona correctamente, se pueden lanzar instan
      - Auto-assign public IP: Enable
      - Security group: `lab02-sg-bastion`
 
-4. Hacer clic en **Launch instance**
+4. **Configurar acceso por contraseña:**
+   - Expandir **Advanced details**
+   - En **User data**, agregar el siguiente script:
+     ```bash
+     #!/bin/bash
+     # Habilitar autenticación por contraseña para ec2-user
+     echo "ec2-user:LabPassword123" | chpasswd
+     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     systemctl restart sshd
+     ```
+
+5. Hacer clic en **Launch instance**
+
+**Nota:** La contraseña `LabPassword123` se puede cambiar posteriormente con el comando `sudo passwd ec2-user`.
 
 #### 7.2 Lanzar Instancia de Prueba en Subnet Privada
 
@@ -325,17 +455,44 @@ Para validar que la arquitectura funciona correctamente, se pueden lanzar instan
      - Auto-assign public IP: Disable
      - Security group: `lab02-sg-privada`
 
-3. Hacer clic en **Launch instance**
+3. **Configurar acceso por contraseña:**
+   - Expandir **Advanced details**
+   - En **User data**, agregar el mismo script:
+     ```bash
+     #!/bin/bash
+     # Habilitar autenticación por contraseña para ec2-user
+     echo "ec2-user:LabPassword123" | chpasswd
+     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     systemctl restart sshd
+     ```
+
+4. Hacer clic en **Launch instance**
+
+**Nota:** La contraseña es la misma para ambas instancias: `LabPassword123`
 
 #### 7.3 Pruebas de Conectividad
 
+**Credenciales de acceso:**
+- **Usuario:** `ec2-user`
+- **Contraseña:** `LabPassword123`
+
 1. **Desde Internet a Bastion (debe funcionar):**
    - Obtener la IP pública del bastion
-   - Conectar via SSH: `ssh -i "mi-keypair.pem" ec2-user@<ip-publica>`
+   - Conectar via SSH usando contraseña:
+     ```bash
+     ssh ec2-user@<ip-publica>
+     # Ingresar contraseña: LabPassword123
+     ```
+   - Alternativamente, usar key pair: `ssh -i "mi-keypair.pem" ec2-user@<ip-publica>`
 
 2. **Desde Bastion a Instancia Privada (debe funcionar):**
    - Desde la sesión SSH del bastion, hacer ping a la IP privada de la instancia privada
-   - Probar SSH a la instancia privada usando su IP privada
+   - Probar SSH a la instancia privada usando su IP privada:
+     ```bash
+     ssh ec2-user@<ip-privada>
+     # Ingresar contraseña: LabPassword123
+     ```
 
 3. **Desde Instancia Privada a Internet (debe funcionar vía NAT):**
    - Conectar primero al bastion
@@ -362,6 +519,10 @@ Al completar este laboratorio, el estudiante debe ser capaz de:
 - [ ] Asociar correctamente cada Route Table a su subnet correspondiente
 - [ ] Crear Security Group para bastion con SSH permitido desde cualquier lugar
 - [ ] Crear Security Group para instancias privadas que permita SSH solo desde el SG del bastion
+- [ ] Crear un Network ACL (NACL) y asociarlo a la subnet privada
+- [ ] Configurar reglas de entrada en NACL para puertos efímeros (stateless)
+- [ ] Configurar reglas de salida en NACL para permitir tráfico saliente
+- [ ] Explicar la diferencia entre Security Groups (stateful) y NACLs (stateless)
 - [ ] Verificar que instancias en subnet pública tienen conectividad a Internet
 - [ ] Verificar que instancias en subnet privada acceden a Internet vía NAT Gateway
 - [ ] Verificar que instancia privada no es accesible directamente desde Internet
@@ -392,10 +553,14 @@ Al completar este laboratorio, el estudiante debe ser capaz de:
 6. **Eliminar Security Groups:**
    - VPC Dashboard > Security Groups > Select SG > Actions > Delete security groups
 
-7. **Eliminar Subnets:**
+7. **Eliminar Network ACLs:**
+   - VPC Dashboard > Network ACLs > Select NACL > Actions > Delete network ACL
+   - Primero desasociar las subnets si están asociadas
+
+8. **Eliminar Subnets:**
    - VPC Dashboard > Subnets > Select subnet > Actions > Delete subnet
 
-8. **Eliminar VPC:**
+9. **Eliminar VPC:**
    - VPC Dashboard > Your VPCs > Select VPC > Actions > Delete VPC
 
 ---

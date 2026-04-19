@@ -1,4 +1,4 @@
-# Lab 2.4: Gestión de VPC y EC2 desde AWS CLI
+# Lab 2.4: Gestión de VPC y EC2 desde AWS CLI (OPCIONAL)
 
 ## Objetivo
 
