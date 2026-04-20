@@ -34,10 +34,10 @@ Aprender a crear AMIs personalizadas desde instancias configuradas, versionarlas
 ```
 us-east-1 (N. Virginia)                us-west-2 (Oregon)
 ┌─────────────────────────┐           ┌─────────────────────────┐
-│ lab02-ami-webserver-v1  │           │ lab02-ami-webserver-v2 │
-│ lab02-ami-webserver-v2  │──Copy AMI→│   (copia)              │
+│ lab02-ami-webserver-v1  │           │ lab02-ami-webserver-v2  │
+│ lab02-ami-webserver-v2  │──Copy AMI→│   (copia)               │
 │                         │           │                         │
-│ AMI compartida ──────Share AMI────→│ Cuenta secundaria       │
+│ AMI compartida ───────Share AMI────→│ Cuenta secundaria       │
 └─────────────────────────┘           └─────────────────────────┘
 ```
 

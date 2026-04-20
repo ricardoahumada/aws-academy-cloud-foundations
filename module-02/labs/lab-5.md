@@ -1,4 +1,4 @@
-# Lab 2.5: VPC Peering - Conexión entre VPCs de Diferentes Cuentas
+# Lab 2.5: VPC Peering - Conexión entre VPCs de Diferentes Cuentas (OPCIONAL)
 
 ## Objetivo
 

@@ -195,6 +195,8 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
      - **Target:** Seleccionar **Internet Gateway** > `lab02-igw`
    - Hacer clic en **Save routes**
 
+   **Nota:** AWS crea automáticamente una ruta local (`10.0.0.0/16 → local`) para permitir comunicación entre todas las subnets de la VPC. Esta ruta no se puede eliminar.
+
 6. **Asociar con subnet pública:**
    - Ir a la pestaña **Subnet associations**
    - Hacer clic en **Edit subnet associations**
@@ -220,7 +222,9 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
      - **Target:** Seleccionar **NAT Gateway** > `lab02-natgw`
    - Hacer clic en **Save routes**
 
-7. **Asociar con subnet privada:**
+   **Nota:** La ruta local (`10.0.0.0/16 → local`) también existe aquí automáticamente para comunicación intra-VPC.
+
+5. **Asociar con subnet privada:**
    - Ir a la pestaña **Subnet associations**
    - Hacer clic en **Edit subnet associations**
    - Seleccionar `lab02-subnet-privada`
@@ -248,15 +252,21 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
    - **VPC:** Seleccionar `lab02-vpc`
 
 4. **Agregar reglas de entrada (Inbound rules):**
-   - Hacer clic en **Edit inbound rules**
    - Hacer clic en **Add rule**
    - Configurar:
      - **Type:** SSH (22)
      - **Source type:** Anywhere-IPv4 (`0.0.0.0/0`)
    - Hacer clic en **Save rules**
 
+   **ADVERTENCIA DE SEGURIDAD:** Permitir SSH desde `0.0.0.0/0` expone el bastion a todo Internet, incluyendo ataques de fuerza bruta.
+   
+   **RECOMENDACIÓN para Producción:**
+   - En lugar de `Anywhere-IPv4`, seleccionar **My IP** para permitir solo tu dirección IP actual
+   - O especificar un rango CIDR corporativo (ej: `203.0.113.0/24`)
+   - Para este laboratorio educativo usamos `0.0.0.0/0` para simplicidad, pero NUNCA en producción
+
 5. **Verificar reglas de salida (Outbound rules):**
-   - Por defecto, todo el tráfico saliente está permitido (Stateful)
+   - Por defecto, todo el tráfico saliente está permitido (comportamiento stateful)
 
 6. Hacer clic en **Create security group**
 
@@ -272,26 +282,31 @@ Diseñar y configurar una VPC (Virtual Private Cloud) con subredes públicas y p
 3. **Agregar reglas de entrada:**
    - **Regla 1 - SSH desde Bastion:**
      - Type: SSH (22)
-     - Source: Custom → Buscar `lab02-sg-bastion`
-   - **Regla 2 - HTTP desde cualquier lugar (para testing):**
+     - Source: Custom → Buscar y seleccionar `lab02-sg-bastion`
+     - Descripción: "SSH access from bastion host only"
+   - **Regla 2 - HTTP para testing interno:**
      - Type: HTTP (80)
-     - Source: Anywhere-IPv4 (`0.0.0.0/0`)
+     - Source: Custom → Buscar y seleccionar `lab02-sg-bastion`
+     - Descripción: "HTTP access from bastion for testing"
+   
+   **Nota:** Como esta es una subnet **privada**, solo permitimos acceso desde el bastion host (no desde Internet directamente). Esto mantiene la seguridad de la arquitectura.
    
 4. Hacer clic en **Create security group**
 
 **Verificación:**
-- `lab02-sg-bastion` debe permitir SSH desde `0.0.0.0/0`
-- `lab02-sg-privada` debe permitir SSH solo desde el SG del bastion
+- `lab02-sg-bastion` debe permitir SSH desde `0.0.0.0/0` (con warning de seguridad)
+- `lab02-sg-privada` debe permitir SSH y HTTP **solo** desde el SG del bastion (no desde Internet)
+- Ambos SG tienen regla outbound por defecto que permite todo el tráfico saliente (stateful)
 
 ---
 
-### Paso 6.5: Crear Network ACLs (NACLs)
+### Paso 7: Crear Network ACLs (NACLs)
 
 **Tiempo estimado:** 15 minutos
 
 Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel de subnet. A diferencia de los Security Groups (stateful), los NACLs son **stateless**, lo que significa que debes permitir explícitamente tanto el tráfico de entrada como el de salida para las respuestas.
 
-#### 6.5.1 Conceptos Fundamentales
+#### 7.1 Conceptos Fundamentales
 
 | Característica | Security Group | NACL |
 |----------------|----------------|------|
@@ -301,7 +316,7 @@ Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel d
 | **Evaluación** | Todas las reglas se evaluan | En orden numérico, primera coincidencia |
 | **Default** | Deny all (sin reglas) | Allow all (nuevos NACLs) |
 
-#### 6.5.2 Crear NACL para Subnet Privada
+#### 7.2 Crear NACL para Subnet Privada
 
 1. En el menú lateral de VPC Dashboard, seleccionar **Network ACLs**
 
@@ -313,7 +328,7 @@ Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel d
 
 4. Hacer clic en **Create network ACL**
 
-#### 6.5.3 Asociar NACL a la Subnet Privada
+#### 7.3 Asociar NACL a la Subnet Privada
 
 1. Seleccionar el NACL recién creado `lab02-nacl-privada`
 
@@ -327,29 +342,29 @@ Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel d
 
 **Verificación:** La subnet `lab02-subnet-privada` aparece asociada al NACL `lab02-nacl-privada`
 
-#### 6.5.4 Configurar Reglas de Entrada
+#### 7.4 Configurar Reglas de Entrada
 
 1. Con el NACL `lab02-nacl-privada` seleccionado, ir a la pestaña **Inbound rules**
 
 2. Hacer clic en **Edit inbound rules**
 
-3. **Agregar regla para SSH (respuesta):**
+3. **Agregar regla para SSH desde subnet pública:**
    - **Rule number:** `100`
-   - **Type:** Custom TCP
+   - **Type:** SSH (22)
    - **Protocol:** TCP (6)
-   - **Port range:** `1024-65535` (puertos efímeros)
-   - **Source:** `0.0.0.0/0`
+   - **Port range:** `22`
+   - **Source:** `10.0.1.0/24` (subnet pública - bastion)
    - **Allow/Deny:** Allow
 
-4. **Agregar regla para HTTP (respuesta):**
+4. **Agregar regla para HTTP (opcional - si aplicación web):**
    - **Rule number:** `110`
-   - **Type:** Custom TCP
+   - **Type:** HTTP (80)
    - **Protocol:** TCP
-   - **Port range:** `1024-65535`
-   - **Source:** `0.0.0.0/0`
+   - **Port range:** `80`
+   - **Source:** `10.0.1.0/24` (subnet pública)
    - **Allow/Deny:** Allow
 
-5. **Agregar regla para HTTPS (respuesta):**
+5. **Agregar regla para respuestas de conexiones salientes (puertos efímeros):**
    - **Rule number:** `120`
    - **Type:** Custom TCP
    - **Protocol:** TCP
@@ -357,51 +372,222 @@ Las Network ACLs (NACLs) son una capa de seguridad adicional que opera a nivel d
    - **Source:** `0.0.0.0/0`
    - **Allow/Deny:** Allow
 
+   **Explicación:** Como NACLs son **stateless**, debemos permitir explícitamente:
+   - Las conexiones **entrantes** (SSH puerto 22, HTTP puerto 80)
+   - Las **respuestas** a conexiones que nosotros iniciamos (puertos efímeros 1024-65535)
+
 6. Hacer clic en **Save changes**
 
-#### 6.5.5 Configurar Reglas de Salida
+#### 7.5 Configurar Reglas de Salida
 
 1. Ir a la pestaña **Outbound rules**
 
 2. Hacer clic en **Edit outbound rules**
 
-3. **Agregar regla para todo el tráfico saliente:**
+3. **Agregar regla para HTTP saliente:**
    - **Rule number:** `100`
-   - **Type:** All Traffic
-   - **Protocol:** All
-   - **Port range:** All
+   - **Type:** HTTP (80)
+   - **Protocol:** TCP
+   - **Port range:** `80`
    - **Destination:** `0.0.0.0/0`
    - **Allow/Deny:** Allow
 
-4. Hacer clic en **Save changes**
+4. **Agregar regla para HTTPS saliente:**
+   - **Rule number:** `110`
+   - **Type:** HTTPS (443)
+   - **Protocol:** TCP
+   - **Port range:** `443`
+   - **Destination:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
 
-**Nota importante:** Los NACLs evaluados en orden numérico. Las reglas con números menores se evalúan primero. El número 100 se evalúa antes que el 110 o 120.
+5. **Agregar regla para respuestas SSH salientes (puertos efímeros):**
+   - **Rule number:** `120`
+   - **Type:** Custom TCP
+   - **Protocol:** TCP
+   - **Port range:** `1024-65535`
+   - **Destination:** `0.0.0.0/0`
+   - **Allow/Deny:** Allow
 
-#### 6.5.6 Comparar Comportamiento: Security Groups vs NACLs
+6. Hacer clic en **Save changes**
+
+**Notas importantes:**
+- Los NACLs son **stateless**: las respuestas a conexiones entrantes (SSH desde bastion) necesitan regla outbound explícita (puertos efímeros)
+- Las reglas se evalúan en **orden numérico**: 100 antes que 110, 110 antes que 120
+- La primera regla que coincide se aplica (deny o allow)
+
+#### 7.6 Comparar Comportamiento: Security Groups vs NACLs
 
 Para demostrar la diferencia entre stateful (SG) y stateless (NACL):
 
-1. **Security Group (Stateful):**
-   - Si permites SSH entrante desde `0.0.0.0/0`, la respuesta automática está permitida sin regla adicional
-   - El return traffic es permitido automáticamente por el estado de la conexión
+**Security Group (Stateful) - Ejemplo con SSH:**
+```
+Inbound:  SSH (22) desde 0.0.0.0/0  → ALLOW
+Outbound: (default allow all)       → No se necesita regla específica
 
-2. **NACL (Stateless):**
-   - Debes permitir explícitamente el tráfico de respuesta
-   - SSH usa puertos efímeros (1024-65535) para la respuesta
-   - Sin la regla de entrada para puertos efémeros, la respuesta sería denegada
+Resultado: ✅ Conexión SSH funciona completamente
+           ✅ Respuesta automáticamente permitida
+```
 
-**Prueba de conectividad:**
-- Verificar que las instancias en la subnet privada pueden acceder a Internet vía NAT Gateway
-- El NAT Gateway ya tiene sus propias reglas de SG que permiten el tráfico
+**NACL (Stateless) - Ejemplo con SSH:**
+```
+Inbound:  SSH (22) desde 10.0.1.0/24     → ALLOW (regla 100)
+Inbound:  Puertos 1024-65535 desde 0.0.0.0/0 → ALLOW (regla 120, respuestas)
+Outbound: Puertos 1024-65535 a 0.0.0.0/0     → ALLOW (regla 120, respuestas)
 
-**Verificación:**
-- `lab02-nacl-privada` está asociada a `lab02-subnet-privada`
-- Las reglas de entrada permiten puertos efímeros desde `0.0.0.0/0`
-- Las reglas de salida permiten todo el tráfico saliente
+Resultado: ✅ Conexión SSH funciona si AMBAS reglas existen
+           ❌ Sin regla outbound → respuesta SSH bloqueada
+```
+
+**Flujo de tráfico completo:**
+```
+1. SSH desde Bastion (10.0.1.5) → Instancia Privada (10.0.2.10)
+   - NACL Inbound: Regla 100 permite puerto 22 desde 10.0.1.0/24 ✓
+   - SG Privado: Permite SSH desde SG Bastion ✓
+   - Conexión establecida
+
+2. Respuesta SSH desde Instancia Privada → Bastion
+   - SG Privado: Stateful, respuesta automática ✓
+   - NACL Outbound: Regla 120 permite puertos efímeros ✓
+   - Respuesta enviada
+```
+
+**Verificación final:**
+- `lab02-nacl-privada` asociada a `lab02-subnet-privada` ✓
+- Reglas inbound: SSH (22), HTTP (80), puertos efímeros (1024-65535) ✓
+- Reglas outbound: HTTP (80), HTTPS (443), puertos efímeros (1024-65535) ✓
+- Orden de evaluación: 100 → 110 → 120 ✓
 
 ---
 
-### Paso 7: Verificación de la Arquitectura
+### Paso 8: Troubleshooting Común de Configuración de Red
+
+**Tiempo estimado:** 5 minutos de revisión
+
+Esta sección lista los errores más comunes al configurar VPCs y cómo solucionarlos.
+
+#### Problema 1: No puedo conectar SSH al Bastion Host
+
+**Síntomas:**
+- Timeout al intentar SSH a la IP pública del bastion
+- `ssh: connect to host X.X.X.X port 22: Connection timed out`
+
+**Posibles causas y soluciones:**
+
+1. **Security Group no permite tu IP:**
+   - ✅ Verificar: VPC Dashboard → Security Groups → `lab02-sg-bastion` → Inbound rules
+   - ✅ Debe mostrar: SSH (22) desde `0.0.0.0/0` o tu IP específica
+   - ❌ Si no existe: Agregar regla SSH con "My IP" como source
+
+2. **Instancia no tiene IP pública:**
+   - ✅ Verificar: EC2 Dashboard → Instancias → Seleccionar bastion → "Public IPv4 address" debe existir
+   - ❌ Si está vacío: La subnet no tiene auto-assign habilitado o la instancia se lanzó sin IP pública
+   - Solución: Terminar instancia y relanzar con "Auto-assign Public IP: Enable"
+
+3. **Route Table de subnet pública sin IGW:**
+   - ✅ Verificar: VPC Dashboard → Route Tables → `lab02-rt-publica` → Routes
+   - ✅ Debe tener: `0.0.0.0/0 → igw-xxxxx`
+   - ❌ Si falta: Editar routes y agregar ruta a Internet Gateway
+
+4. **Internet Gateway no está attached:**
+   - ✅ Verificar: VPC Dashboard → Internet Gateways → Estado debe ser "Attached"
+   - ❌ Si dice "Detached": Actions → Attach to VPC → Seleccionar `lab02-vpc`
+
+#### Problema 2: No puedo conectar desde Bastion a Instancia Privada
+
+**Síntomas:**
+- Desde el bastion, `ssh ec2-user@10.0.2.X` da timeout o "No route to host"
+- `ping 10.0.2.X` no funciona
+
+**Posibles causas y soluciones:**
+
+1. **Security Group de instancia privada no permite SSH desde Bastion:**
+   - ✅ Verificar: Security Groups → `lab02-sg-privada` → Inbound rules
+   - ✅ Debe mostrar: SSH (22) con Source = `lab02-sg-bastion` (el SG, no una IP)
+   - ❌ Si no existe: Agregar regla SSH con source = Security Group del bastion
+
+2. **NACL bloqueando SSH entrante:**
+   - ✅ Verificar: Network ACLs → `lab02-nacl-privada` → Inbound rules
+   - ✅ Debe tener: Regla 100 permitiendo TCP 22 desde `10.0.1.0/24`
+   - ❌ Si falta: Agregar regla inbound para puerto 22
+
+3. **NACL bloqueando respuestas (puertos efímeros):**
+   - ✅ Verificar: Network ACLs → `lab02-nacl-privada` → Outbound rules
+   - ✅ Debe tener: Regla permitiendo TCP 1024-65535 a `0.0.0.0/0`
+   - ❌ Si falta: Agregar regla outbound para puertos efímeros
+
+4. **Instancias en subnets diferentes o AZs incompatibles:**
+   - ✅ Verificar: Ambas instancias deben estar en `lab02-vpc`
+   - ✅ Verificar: Route Tables tienen ruta local `10.0.0.0/16 → local` (automática)
+
+#### Problema 3: Instancia Privada no puede acceder a Internet
+
+**Síntomas:**
+- Desde instancia privada: `curl www.google.com` da timeout
+- `ping 8.8.8.8` no funciona
+- No se pueden actualizar paquetes con `yum update`
+
+**Posibles causas y soluciones:**
+
+1. **Route Table de subnet privada sin NAT Gateway:**
+   - ✅ Verificar: Route Tables → `lab02-rt-privada` → Routes
+   - ✅ Debe tener: `0.0.0.0/0 → nat-xxxxx`
+   - ❌ Si falta: Editar routes y agregar ruta a NAT Gateway
+
+2. **NAT Gateway no está disponible:**
+   - ✅ Verificar: VPC Dashboard → NAT Gateways → Estado debe ser "Available"
+   - ❌ Si dice "Failed" o "Pending": Esperar o recrear NAT Gateway
+   - ⚠️ Importante: NAT Gateway DEBE estar en subnet pública
+
+3. **NAT Gateway sin Elastic IP:**
+   - ✅ Verificar: NAT Gateways → Seleccionar `lab02-natgw` → "Elastic IP address" debe existir
+   - ❌ Si está vacío: El NAT no puede funcionar, recrear con EIP
+
+4. **NACL bloqueando tráfico HTTP/HTTPS saliente:**
+   - ✅ Verificar: Network ACLs → `lab02-nacl-privada` → Outbound rules
+   - ✅ Debe tener: Reglas permitiendo TCP 80 y 443 a `0.0.0.0/0`
+   - ❌ Si faltan: Agregar reglas outbound para puertos 80 y 443
+
+5. **NACL bloqueando respuestas HTTP/HTTPS entrantes:**
+   - ✅ Verificar: Network ACLs → `lab02-nacl-privada` → Inbound rules
+   - ✅ Debe tener: Regla permitiendo TCP 1024-65535 desde `0.0.0.0/0` (respuestas)
+   - ❌ Si falta: Agregar regla inbound para puertos efímeros
+
+#### Problema 4: Costos inesperados del NAT Gateway
+
+**Síntoma:**
+- La factura de AWS muestra cargos por NAT Gateway
+
+**Explicación:**
+- NAT Gateways tienen costo por hora (~$0.045/hora) + costo por GB procesado (~$0.045/GB)
+- Aproximadamente $32/mes si está activo 24/7, más tráfico de datos
+
+**Solución:**
+- ✅ Para laboratorios: Eliminar NAT Gateway después de completar las pruebas
+- ✅ Alternativa económica: NAT Instance en EC2 (más compleja de configurar)
+- ✅ Liberar Elastic IP no utilizada (si eliminas NAT Gateway)
+
+#### Checklist de Verificación Rápida
+
+| Componente | Verificación | Estado ✓/❌ |
+|------------|--------------|-------------|
+| **VPC** | CIDR `10.0.0.0/16` creada | |
+| **Subnets** | Pública `10.0.1.0/24` con auto-assign IP habilitado | |
+| | Privada `10.0.2.0/24` sin auto-assign IP | |
+| **Internet Gateway** | Creado y attached a VPC | |
+| **NAT Gateway** | Estado "Available" con EIP en subnet pública | |
+| **Route Tables** | RT Pública: `0.0.0.0/0 → igw-xxx` asociada a subnet pública | |
+| | RT Privada: `0.0.0.0/0 → nat-xxx` asociada a subnet privada | |
+| **Security Groups** | SG Bastion: SSH (22) desde `0.0.0.0/0` o My IP | |
+| | SG Privada: SSH (22) desde `lab02-sg-bastion` | |
+| | SG Privada: HTTP (80) desde `lab02-sg-bastion` | |
+| **NACLs** | NACL Privada: Inbound SSH (22) desde `10.0.1.0/24` | |
+| | NACL Privada: Inbound puertos 1024-65535 desde `0.0.0.0/0` | |
+| | NACL Privada: Outbound HTTP/HTTPS (80/443) a `0.0.0.0/0` | |
+| | NACL Privada: Outbound puertos 1024-65535 a `0.0.0.0/0` | |
+
+---
+
+### Paso 9: Verificación de la Arquitectura
 
 **Tiempo estimado:** 10 minutos
 
