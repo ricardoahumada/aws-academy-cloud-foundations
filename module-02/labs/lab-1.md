@@ -617,8 +617,13 @@ Para validar que la arquitectura funciona correctamente, se pueden lanzar instan
      #!/bin/bash
      # Habilitar autenticación por contraseña para ec2-user
      echo "ec2-user:LabPassword123" | chpasswd
-     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     
+     # Asegurar que PasswordAuthentication esté habilitado
+     sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     
+     # Si la línea no existe, agregarla
+     grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+     
      systemctl restart sshd
      ```
 
@@ -648,8 +653,13 @@ Para validar que la arquitectura funciona correctamente, se pueden lanzar instan
      #!/bin/bash
      # Habilitar autenticación por contraseña para ec2-user
      echo "ec2-user:LabPassword123" | chpasswd
-     sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
-     sed -i 's/#PasswordAuthentication/PasswordAuthentication/' /etc/ssh/sshd_config
+     
+     # Asegurar que PasswordAuthentication esté habilitado
+     sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
+     
+     # Si la línea no existe, agregarla
+     grep -q "^PasswordAuthentication yes" /etc/ssh/sshd_config || echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+     
      systemctl restart sshd
      ```
 

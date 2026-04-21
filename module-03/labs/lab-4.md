@@ -1,4 +1,4 @@
-# Lab 3.4: Roles Avanzados y Políticas Complejas
+# Lab 3.4: Roles Avanzados y Políticas Complejas (OPCIONAL)
 
 ## Objetivo
 
