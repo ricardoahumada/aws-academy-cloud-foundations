@@ -237,7 +237,7 @@ def lambda_handler(event, context):
 2. Seleccionar **SQS** como source
 3. Configurar:
    - **SQS queue**: `ordenes-procesamiento.fifo`
-   - **Batch size**: **10** (las colas FIFO soportan batch size hasta 10; usar 1 solo si el procesamiento de mensajes debe ser estrictamente secuencial a nivel de registro)
+   - **Batch size**: **10** (el máximo para FIFO es 10,000 desde 2022, pero 10 es un buen valor para este lab; usar 1 solo si el procesamiento debe ser estrictamente secuencial por mensaje)
    - **Batch window**: **0** (opcional, para batching)
 4. Clic en **Add**
 
@@ -369,9 +369,11 @@ END RequestId: xxx-xxx-xxx
 
 ```bash
 # Invocar función manualmente para generar métricas
+# IMPORTANTE: el payload debe tener el formato SQS event con 'Records'
+# Un payload sin 'Records' causa KeyError en la función
 aws lambda invoke \
   --function-name procesar-orden \
-  --payload '{"test": true}' \
+  --payload '{"Records":[{"body":"{\\"order_id\\":\\"TEST-001\\",\\"customer\\":\\"Test User\\",\\"amount\\":99.99}"}]}' \
   response.json
 
 # Ver métricas en CloudWatch
@@ -428,10 +430,13 @@ Al completar este lab, debes ser capaz de:
 Para evitar costos innecesarios, al finalizar el lab ejecutar:
 
 ```bash
-# Deshabilitar trigger de Lambda
-aws lambda remove-permission \
+# Eliminar el event source mapping (trigger SQS) de Lambda
+# Primero obtener el UUID del mapping
+ESM_UUID=$(aws lambda list-event-source-mappings \
   --function-name procesar-orden \
-  --statement-id sqs-trigger
+  --query 'EventSourceMappings[0].UUID' \
+  --output text)
+aws lambda delete-event-source-mapping --uuid "$ESM_UUID"
 
 # Eliminar función Lambda
 aws lambda delete-function \

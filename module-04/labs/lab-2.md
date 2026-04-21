@@ -260,17 +260,19 @@ curl -s -I http://www.mi-dominio.example.com
 
 **Simular fallo del primario:**
 1. Ir a **Route 53** > **Health checks**
-2. Deshabilitar el health check `hc-primary-web`:
-   - Seleccionar el health check > **Actions** > **Stop**
-3. Esperar 60-90 segundos (interval + threshold)
+2. Forzar fallo del health check `hc-primary-web` editando su path:
+   - Seleccionar el health check > **Actions** > **Edit health check**
+   - Cambiar **Path** de `/index.html` a `/fallo-test-404`
+   - Guardar
+3. Esperar 60-90 segundos (interval × failure threshold)
 4. Hacer request nuevamente:
 ```bash
 curl -s -I http://www.mi-dominio.example.com
 # Ahora debe mostrar headers del S3 static website
 ```
 
-5. **Rehabilitar el health check** después de la prueba:
-   - Seleccionar > **Actions** > **Start**
+5. **Restaurar el health check** después de la prueba:
+   - Volver a editar el health check y cambiar **Path** de nuevo a `/index.html`
 
 ---
 
@@ -282,10 +284,12 @@ curl -s -I http://www.mi-dominio.example.com
 2. Configurar:
    - **Record name**: `geo.mi-dominio.example.com`
    - **Record type**: **A**
+   - Activar el toggle **Alias**
+   - **Route traffic to**: **Alias to Application and Classic Load Balancer**
+   - **Region**: us-east-1
+   - **Load balancer**: seleccionar el DNS del ALB en us-east-1
    - **Routing policy**: **Geolocation**
    - **Location**: **United States**
-   - **Value**: **ALB DNS para US**
-   - **TTL**: **60**
    - **Evaluate target health**: **Yes**
 3. Clic en **Create records**
 
@@ -294,20 +298,28 @@ curl -s -I http://www.mi-dominio.example.com
 1. Crear otro record con:
    - **Record name**: `geo.mi-dominio.example.com`
    - **Record type**: **A**
+   - Activar el toggle **Alias**
+   - **Route traffic to**: **Alias to Application and Classic Load Balancer**
+   - **Region**: eu-west-1
+   - **Load balancer**: seleccionar el DNS del ALB en eu-west-1
    - **Routing policy**: **Geolocation**
    - **Location**: **Europe**
-   - **Value**: **ALB DNS para Europa**
-   - **TTL**: **60**
+   - **Evaluate target health**: **Yes**
 
 ### 6.3 Crear record Default (para usuarios de otras regiones)
 
 1. Crear otro record con:
    - **Record name**: `geo.mi-dominio.example.com`
    - **Record type**: **A**
+   - Activar el toggle **Alias**
+   - **Route traffic to**: **Alias to Application and Classic Load Balancer**
+   - **Region**: us-east-1
+   - **Load balancer**: seleccionar el DNS del ALB por defecto
    - **Routing policy**: **Geolocation**
    - **Location**: **Default**
-   - **Value**: **ALB DNS default**
-   - **TTL**: **60**
+   - **Evaluate target health**: **Yes**
+
+> **Nota**: Los registros Alias NO admiten TTL personalizado; AWS lo gestiona automáticamente.
 
 ### 6.4 Verificar Geolocation routing
 
@@ -404,16 +416,16 @@ Al completar este lab, debes ser capaz de:
 Para eliminar los recursos creados:
 
 ```bash
-# Eliminar todos los records de la hosted zone
-aws route53 list-resource-record-sets --hosted-zone-id <zone-id> --output json | \
-  jq -c '.ResourceRecordSets[] | select(.Name != "") | {Name:.Name, Type:.Type}' | \
-  while read record; do
-    name=$(echo $record | jq -r '.Name')
-    type=$(echo $record | jq -r '.Type')
-    aws route53 change-resource-record-sets \
-      --hosted-zone-id <zone-id> \
-      --change-batch "{\"Changes\":[{\"Action\":\"DELETE\",\"ResourceRecordSet\":{\"Name\":\"$name\",\"Type\":\"$type\"}}]}"
-  done
+# Eliminar records de la hosted zone (EXCEPTO NS y SOA, que son obligatorios)
+# IMPORTANTE: la API de Route 53 requiere el ResourceRecordSet completo (TTL + valores)
+# para eliminar un registro. El método más seguro es usar la consola:
+#   Route 53 > Hosted zones > <zona> > seleccionar cada record > Delete
+
+# Para registros Alias creados en este lab, hacerlo desde la consola:
+#   - ab.mi-dominio.example.com (Weighted x2)
+#   - latency.mi-dominio.example.com (Latency x2)
+#   - www.mi-dominio.example.com (Failover x2)
+#   - geo.mi-dominio.example.com (Geolocation x3)
 
 # Eliminar health checks
 aws route53 delete-health-check --health-check-id <health-check-id-1>

@@ -99,10 +99,9 @@ En este paso crearás un cluster de ECS que utilizará Fargate como tipo de infr
 
 3.4. En la configuración del cluster:
    - **Cluster name**: `my-cluster`
-   - **VPC**: Selecciona **"Create a new VPC"**
-   - **CIDR block**: `10.0.0.0/16`
-   - **Number of subnets**: 2 (privadas, ej: `10.0.1.0/24` y `10.0.2.0/24`)
    - **Infrastructure**: Selecciona **AWS Fargate**
+
+   > **Nota:** En la consola actual de ECS la creación del cluster NO incluye configuración de VPC ni subnets. Esas opciones se configuran más adelante al crear el Service (Paso 5).
 
 3.5. Expande la sección **"Monitoring"** y asegúrate de que **"Container Insights"** esté habilitado.
 
@@ -124,7 +123,7 @@ La task definition es el blueprint que define cómo se ejecutará tu contenedor.
 
 4.4. En la configuración de la task definition:
    - **Task definition family**: `my-webapp-task`
-   - **Task role**: Selecciona **"ecsTaskExecutionRole"** (o créala si no existe)
+   - **Task execution role**: Selecciona **"ecsTaskExecutionRole"** (o créala si no existe)
    - **Operating system family**: `Linux`
    - **Network mode**: `awsvpc`
    - **Task size**:
@@ -169,7 +168,7 @@ En este paso crearás un ECS Service que mantendrárunning tus tareas y las dist
 5.5. En **"Network configuration"**:
    - **Cluster VPC**: Selecciona la VPC que creaste (`10.0.0.0/16`)
    - **Subnets**: Selecciona las 2 subnets privadas
-   - **Security group**: Crea uno nuevo con regla inbound para `8000` desde `0.0.0.0/0`
+   - **Security group**: Crea uno nuevo con regla inbound para `8000` desde el CIDR de la VPC (`10.0.0.0/16`)
    - **Auto-assign public IP**: `DISABLE`
 
 5.6. En **"Load balancing"**:
@@ -276,8 +275,16 @@ Para evitar costos innecesarios, elimina los recursos creados:
 # Eliminar el service
 aws ecs delete-service --cluster my-cluster --service my-webapp-service --force
 
-# Eliminar el cluster (también elimina los recursos de red)
+# Eliminar el cluster
 aws ecs delete-cluster --cluster my-cluster
+
+# Eliminar el Application Load Balancer
+ALB_ARN=$(aws elbv2 describe-load-balancers --names my-webapp-alb --query 'LoadBalancers[0].LoadBalancerArn' --output text)
+aws elbv2 delete-load-balancer --load-balancer-arn $ALB_ARN
+
+# Esperar a que el ALB sea eliminado y luego eliminar el Target Group
+TG_ARN=$(aws elbv2 describe-target-groups --names my-webapp-tg --query 'TargetGroups[0].TargetGroupArn' --output text)
+aws elbv2 delete-target-group --target-group-arn $TG_ARN
 
 # Eliminar la imagen de ECR (batch-delete-image es el comando correcto)
 aws ecr batch-delete-image \

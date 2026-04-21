@@ -304,7 +304,9 @@ nohup python3 /home/ec2-user/app.py > /tmp/app.log 2>&1 &
    - **Engine type**: MySQL
    - **Version**: Seleccionar la versión más reciente disponible (MySQL 8.0.x o 8.4.x según disponibilidad en la consola)
 
-3. **Templates**: seleccionar **Free tier** (para demo) o **Production** (para Multi-AZ real)
+3. **Templates**: seleccionar **Dev/Test** (para demostración con Multi-AZ a menor costo) o **Production** (para configuración completa de producción)
+
+   > **IMPORTANTE**: El template **Free tier** deshabilita explícitamente Multi-AZ y no permite el campo "Create a standby instance". Para practicar Multi-AZ usar **Dev/Test** o **Production**.
 
 4. **Settings**:
    - **DB instance identifier**: `mi-db`

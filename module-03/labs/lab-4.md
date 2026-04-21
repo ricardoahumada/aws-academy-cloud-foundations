@@ -106,6 +106,9 @@ aws sts get-caller-identity
 
 3. Probar acciones que DEBEN funcionar:
 ```bash
+# Crear el bucket de prueba primero (si no existe)
+aws s3 mb s3://mi-bucket-test
+
 # Listar buckets (Allow en boundary)
 aws s3 ls
 
@@ -175,16 +178,18 @@ aws s3 mb s3://bucket-cross-account-test
 ROLE_ARN="arn:aws:iam::999999999999:role/CrossAccountS3ReadRole"
 SESSION_NAME="test-cross-account-session"
 
-# Assumir rol y extraer credenciales usando --query (sin jq)
+# Llamar assume-role UNA sola vez y extraer credenciales
 TEMP_CREDS=$(aws sts assume-role \
   --role-arn $ROLE_ARN \
   --role-session-name $SESSION_NAME \
   --output json)
 
-ACCESS_KEY=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name $SESSION_NAME --query 'Credentials.AccessKeyId' --output text)
-SECRET_KEY=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name $SESSION_NAME --query 'Credentials.SecretAccessKey' --output text)
-TOKEN=$(aws sts assume-role --role-arn $ROLE_ARN --role-session-name $SESSION_NAME --query 'Credentials.SessionToken' --output text)
+ACCESS_KEY=$(echo $TEMP_CREDS | python3 -c "import sys,json; c=json.load(sys.stdin)['Credentials']; print(c['AccessKeyId'])")
+SECRET_KEY=$(echo $TEMP_CREDS | python3 -c "import sys,json; c=json.load(sys.stdin)['Credentials']; print(c['SecretAccessKey'])")
+TOKEN=$(echo $TEMP_CREDS | python3 -c "import sys,json; c=json.load(sys.stdin)['Credentials']; print(c['SessionToken'])")
 ```
+
+**IMPORTANTE**: No llamar a `assume-role` por separado para cada variable; cada llamada crea una sesión diferente con credenciales distintas e incompatibles entre sí.
 
 **Windows (PowerShell):**
 ```powershell
@@ -343,7 +348,27 @@ aws iam create-user --user-name nuevo-usuario
 # Resultado: Access Denied (MFA required)
 ```
 
-6. Habilitar MFA para el usuario y repetir la prueba (debe funcionar)
+6. Para probar que funciona **con MFA** desde el CLI, el usuario debe obtener credenciales temporales con el token MFA:
+```bash
+# Obtener el ARN del dispositivo MFA del usuario
+MFA_ARN=$(aws iam list-mfa-devices --user-name test-mfa-user --query 'MFADevices[0].SerialNumber' --output text)
+
+# Solicitar credenciales temporales con código MFA
+MFA_CREDS=$(aws sts get-session-token \
+  --serial-number $MFA_ARN \
+  --token-code <código-de-6-dígitos-de-la-app-MFA> \
+  --output json)
+
+# Exportar las credenciales temporales
+export AWS_ACCESS_KEY_ID=$(echo $MFA_CREDS | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['AccessKeyId'])")
+export AWS_SECRET_ACCESS_KEY=$(echo $MFA_CREDS | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SecretAccessKey'])")
+export AWS_SESSION_TOKEN=$(echo $MFA_CREDS | python3 -c "import sys,json; print(json.load(sys.stdin)['Credentials']['SessionToken'])")
+
+# Ahora la acción debe funcionar (aws:MultiFactorAuthPresent = true)
+aws iam create-user --user-name nuevo-usuario
+```
+
+**NOTA**: Simplemente "habilitar" MFA en la consola no hace que el CLI incluya automáticamente MFA en las peticiones. Se requiere usar `sts get-session-token` con el código OTP para obtener credenciales temporales que lleven el atributo `MultiFactorAuthPresent = true`.
 
 ---
 

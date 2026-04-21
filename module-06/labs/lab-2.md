@@ -37,7 +37,7 @@ Implementar un pipeline de procesamiento de eventos utilizando EventBridge como 
 | Recurso | Nombre | Tipo |
 |---------|--------|------|
 | SQS Queue (principal) | `order-processing-queue.fifo` | Amazon SQS |
-| SQS Queue (DLQ) | `order-processing-dlq.fifo` | Amazon SQS |
+| SQS Queue (DLQ) | `order-processing-dlq` | Amazon SQS (Standard) |
 | Función Lambda | `process-order` | AWS Lambda |
 | Event Bridge | `order-event-bus` | Amazon EventBridge |
 | EventBridge Rule | `order-created-rule` | Amazon EventBridge |
@@ -53,9 +53,11 @@ Implementar un pipeline de procesamiento de eventos utilizando EventBridge como 
 1.2. Navega a **SQS** > **Queues** > **Create queue**
 
 1.3. En la configuración de la cola:
-   - **Type**: FIFO
-   - **Name**: `order-processing-dlq.fifo`
+   - **Type**: **Standard** (NO FIFO)
+   - **Name**: `order-processing-dlq`
    - **Description** (opcional): Cola para mensajes fallidos
+
+   > **IMPORTANTE**: EventBridge solo puede enviar eventos fallidos a colas SQS **Standard**. Las colas FIFO requieren un `MessageGroupId` que EventBridge no proporciona al hacer entregas a DLQ, por lo que la entrega fallaría.
 
 1.4. En **Configuration**:
    - **Visibility timeout**: 30 seconds (valor por defecto)
@@ -84,7 +86,7 @@ Implementar un pipeline de procesamiento de eventos utilizando EventBridge como 
 
 2.4. En **Dead letter queue**:
    - **Dead letter queue**: Yes
-   - **Dead letter queue ARN**: Pega el ARN de la DLQ creada en el Paso 1
+   - **Dead letter queue ARN**: Pega el ARN de la DLQ (`order-processing-dlq`) creada en el Paso 1
    - **Maximum receives**: 3 (el mensaje irá a DLQ después de 3 intentos fallidos)
 
 2.5. Haz clic en **Create queue**
@@ -109,67 +111,53 @@ Implementar un pipeline de procesamiento de eventos utilizando EventBridge como 
 
 ```python
 import json
-import boto3
 import random
-import os
 
 def lambda_handler(event, context):
     # Print event for debugging
     print(f"Received event: {json.dumps(event)}")
     
-    # Get environment variable for DLQ arn
-    dlq_arn = os.environ.get('DLQ_ARN', '')
+    # EventBridge places the event Detail object directly under event['detail']
+    # Each put-events entry generates one Lambda invocation with one order
+    detail = event.get('detail', {})
     
-    # Process each record from EventBridge
+    if not detail:
+        print("No detail found in event")
+        return {
+            'statusCode': 200,
+            'body': json.dumps('No detail to process')
+        }
+    
     try:
-        # Extract records from detail
-        records = event.get('detail', {}).get('records', [])
+        order_id = detail.get('orderId', 'UNKNOWN')
+        customer_id = detail.get('customerId', 'UNKNOWN')
+        amount = detail.get('amount', 0)
         
-        if not records:
-            print("No records found in event")
-            return {
-                'statusCode': 200,
-                'body': json.dumps('No records to process')
-            }
+        print(f"Processing order {order_id} for customer {customer_id}, amount: ${amount}")
         
-        processed_count = 0
-        failed_count = 0
+        # Simulate processing with 10% chance of failure
+        if random.random() < 0.1:
+            print(f"Simulated failure for order {order_id}")
+            raise Exception(f"Simulated failure for order {order_id}")
         
-        for record in records:
-            order_id = record.get('orderId', 'UNKNOWN')
-            customer_id = record.get('customerId', 'UNKNOWN')
-            amount = record.get('amount', 0)
-            
-            print(f"Processing order {order_id} for customer {customer_id}, amount: ${amount}")
-            
-            # Simulate processing with 10% chance of failure
-            if random.random() < 0.1:
-                print(f"Simulated failure for order {order_id}")
-                raise Exception(f"Simulated failure for order {order_id}")
-            
-            print(f"Successfully processed order {order_id}")
-            processed_count += 1
+        print(f"Successfully processed order {order_id}")
         
         return {
             'statusCode': 200,
-            'body': json.dumps(f'Processed {processed_count} orders successfully')
+            'body': json.dumps(f'Processed order {order_id} successfully')
         }
         
     except Exception as e:
-        print(f"Error processing orders: {str(e)}")
-        # Lambda will retry automatically; if all retries fail, goes to DLQ
+        print(f"Error processing order: {str(e)}")
+        # EventBridge reintentará según la Retry policy; tras agotar reintentos,
+        # el evento va a la DLQ configurada en la regla.
         raise
 ```
 
-3.5. En la sección **Environment variables**, haz clic en **Edit**:
-   - Haz clic en **Add environment variable**
-   - **Key**: `DLQ_ARN`
-   - **Value**: Pega el ARN de la DLQ creada en el Paso 1
-
-3.6. En la sección **Basic settings**:
+3.5. En la sección **Basic settings**:
    - **Timeout**: 30 seconds (para este lab)
 
-3.7. Haz clic en **Deploy**
+3.6. Haz clic en **Deploy**
 
 ---
 
@@ -225,7 +213,9 @@ def lambda_handler(event, context):
    - En **Additional settings**:
      - **Retry attempts**: 2
      - **Dead-letter queue**: SQS queue
-     - **Queue ARN**: Pega el ARN de la cola `order-processing-queue.fifo`
+     - **Queue ARN**: Pega el ARN de la cola `order-processing-dlq` (la DLQ Standard del Paso 1)
+
+   > **NOTA**: El DLQ configurado aquí es el de **EventBridge**: recibe los eventos que EventBridge no pudo entregar a Lambda tras agotar los reintentos. Es diferente del DLQ que configuraste en la cola SQS principal (Paso 2).
 
    - Haz clic en **Next**
 
@@ -274,13 +264,13 @@ aws lambda add-permission \
 7.2. Ejecuta el siguiente comando para enviar un evento de prueba:
 
 ```bash
-# Enviar evento de prueba (el campo Time es opcional; si se omite, EventBridge usa el tiempo actual)
+# Enviar evento de prueba
 aws events put-events \
     --entries '[{
         "EventBusName": "order-event-bus",
         "Source": "com.mycompany.orders",
         "DetailType": "OrderCreated",
-        "Detail": "{\\"orderId\\": \\"ORD-001\\", \\"customerId\\": \\"CUST-001\\", \\"amount\\": 100.00, \\"status\\": \\"pending\\"}"
+        "Detail": "{\"orderId\": \"ORD-001\", \"customerId\": \"CUST-001\", \"amount\": 100.00, \"status\": \"pending\"}"
     }]'
 ```
 
@@ -306,13 +296,13 @@ aws events put-events \
         "EventBusName": "order-event-bus",
         "Source": "com.mycompany.orders",
         "DetailType": "OrderCreated",
-        "Detail": "{\\"orderId\\": \\"ORD-002\\", \\"customerId\\": \\"CUST-002\\", \\"amount\\": 250.00, \\"status\\": \\"pending\\"}"
+        "Detail": "{\"orderId\": \"ORD-002\", \"customerId\": \"CUST-002\", \"amount\": 250.00, \"status\": \"pending\"}"
     },
     {
         "EventBusName": "order-event-bus",
         "Source": "com.mycompany.orders",
         "DetailType": "OrderCreated",
-        "Detail": "{\\"orderId\\": \\"ORD-003\\", \\"customerId\\": \\"CUST-003\\", \\"amount\\": 75.50, \\"status\\": \\"pending\\"}"
+        "Detail": "{\"orderId\": \"ORD-003\", \"customerId\": \"CUST-003\", \"amount\": 75.50, \"status\": \"pending\"}"
     }]'
 ```
 
@@ -344,12 +334,12 @@ Simulated failure for order ORD-xxx
 Error processing orders: Simulated failure for order ORD-xxx
 ```
 
-8.6. Después de 3 intentos fallidos, verifica que los mensajes lleguen a la DLQ:
+8.6. Si EventBridge agota los reintentos (Retry attempts: 2 = 3 intentos totales) y no puede entregar el evento a Lambda, verifica que los eventos fallidos lleguen a la DLQ de EventBridge:
 
-   - Navega a **SQS** > **Queues** > `order-processing-dlq.fifo`
+   - Navega a **SQS** > **Queues** > `order-processing-dlq`
    - Haz clic en **Send and receive messages**
    - Haz clic en **Poll for messages**
-   - Verifica que aparecen mensajes de las órdenes fallidas
+   - Verifica que aparecen mensajes de las órdenes que EventBridge no pudo entregar
 
 ---
 
@@ -358,7 +348,7 @@ Error processing orders: Simulated failure for order ORD-xxx
 Al finalizar el lab, verifica que puedes realizar las siguientes acciones:
 
 - [ ] La cola `order-processing-queue.fifo` está creada con Redrive policy configurada
-- [ ] La cola `order-processing-dlq.fifo` está creada
+- [ ] La cola `order-processing-dlq` (Standard) está creada
 - [ ] La función Lambda `process-order` está creada y desplegada
 - [ ] El event bus `order-event-bus` está creado
 - [ ] La regla `order-created-rule` está creada y habilitada
@@ -395,7 +385,7 @@ Para eliminar los recursos creados y evitar costos adicionales:
    - Lambda > Functions > `process-order` > Delete
 
 4. **Eliminar las colas SQS**:
-   - SQS > Queues > Seleccionar ambas colas > Delete
+   - SQS > Queues > Seleccionar `order-processing-queue.fifo` y `order-processing-dlq` > Delete
 
 ---
 

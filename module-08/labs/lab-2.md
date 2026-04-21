@@ -333,12 +333,12 @@ aws dynamodb get-item \
 **Paso 5.4: Verificar que el tráfico NO sale a internet**
 
 ```bash
-# Verificar IP pública (debe estar vacía o ser IP privada AWS)
-curl https://ipinfo.io/ip
-# Output esperado: IP privada (no pública)
+# Verificar que no hay NAT ni internet gateway disponible
+# (el curl fallará con timeout, confirmando ausencia de internet)
+curl --max-time 5 https://ipinfo.io/ip
+# Output esperado: timeout o "Could not connect" - confirma que no hay salida a internet
 
-# Verificar que no hay NAT ni internet gateway
-# El tráfico S3 y DynamoDB debe ir por el endpoint
+# Verificar endpoints activos
 aws ec2 describe-vpc-endpoints \
     --vpc-endpoint-ids vpce-xxxxxxxx vpce-yyyyyyyy \
     --query 'VpcEndpoints[*].{Id:VpcEndpointId,State:State,ServiceName:ServiceName}'
@@ -401,9 +401,9 @@ aws ec2 delete-route \
 **Solución:**
 ```bash
 # Verificar que EC2 tiene IAM role
-aws ec2 describe-instance-attribute \
-    --instance-id i-xxxxxxxx \
-    --attribute sriovNetSupport
+aws ec2 describe-instances \
+    --instance-ids i-xxxxxxxx \
+    --query 'Reservations[0].Instances[0].IamInstanceProfile'
 
 # Verificar permisos del bucket
 aws s3api get-bucket-policy --bucket my-bucket-lab-82
@@ -436,13 +436,9 @@ aws ec2 authorize-security-group-ingress \
 ## Limpieza de Recursos
 
 ```bash
-# Eliminar Gateway Endpoint para S3
-aws ec2 delete-vpc-endpoint \
-    --vpc-endpoint-id vpce-xxxxxxxx
-
-# Eliminar Interface Endpoint para DynamoDB
-aws ec2 delete-vpc-endpoint \
-    --vpc-endpoint-id vpce-yyyyyyyy
+# Eliminar Gateway Endpoint para S3 y Interface Endpoint para DynamoDB
+aws ec2 delete-vpc-endpoints \
+    --vpc-endpoint-ids vpce-xxxxxxxx vpce-yyyyyyyy
 
 # Eliminar política del bucket
 aws s3api delete-bucket-policy --bucket my-bucket-lab-82

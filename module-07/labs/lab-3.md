@@ -126,7 +126,7 @@ En este paso crearás el cluster EKS y el node group.
    vpc:
      cidr: 10.0.0.0/16
      nat:
-       gateway: HighlyAvailable
+       gateway: Single
 
    managedNodeGroups:
      - name: workers

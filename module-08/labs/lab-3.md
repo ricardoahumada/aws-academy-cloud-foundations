@@ -44,12 +44,12 @@ Establecer conexión VPN Site-to-Site entre un entorno simulado on-premises y AW
 │   │                                                                         │  │
 │   │   ┌────────────────────────────────────────────────────────────────┐  │  │
 │   │   │                  Virtual Private Gateway                       │  │  │
-│   │   │                      (VPG/TTGW)                                 │  │  │
+│   │   │                      (VGW)                                        │  │  │
 │   │   │                     ASN: 64512                                  │  │  │
 │   │   └────────────────────────────┬───────────────────────────────────┘  │  │
 │   │                                │                                        │  │
 │   │                    Tunnel 1 ───┴──── Tunnel 2                         │  │
-│   │                   (169.254.0.0/30)    (169.254.0.4/30)                │  │
+│   │                  (169.254.100.0/30)  (169.254.100.4/30)               │  │
 │   └────────────────────────────────────────────────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────────────────┘
                                       │
@@ -67,7 +67,7 @@ Establecer conexión VPN Site-to-Site entre un entorno simulado on-premises y AW
 │   │   └────────────────────────────────────────────────────────────────┘  │  │
 │   │                                │                                        │  │
 │   │                   Tunnel 1 ───┬──── Tunnel 2                          │  │
-│   │                  (169.254.0.1/30)  (169.254.0.5/30)                  │  │
+│   │                (169.254.100.2/30)  (169.254.100.6/30)                │  │
 │   └────────────────────────────────────────────────────────────────────────┘  │
 │                                                                                │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -134,7 +134,7 @@ aws ec2 enable-vgw-route-propagation \
 # Verificar que la propagación está habilitada
 aws ec2 describe-route-tables \
     --route-table-id rtb-xxxxxxxx \
-    --query 'RouteTables[0].RouteAssociations'
+    --query 'RouteTables[0].PropagatingVgws'
 
 # Listar rutas aprendidas (aparecerán cuando VPN esté activo)
 aws ec2 describe-route-tables \
@@ -186,7 +186,7 @@ aws ec2 create-vpn-connection \
     --options '{
         "TunnelOptions": [
             {
-                "TunnelInsideCidr": "169.254.0.0/30",
+                "TunnelInsideCidr": "169.254.100.0/30",
                 "PreSharedKey": "labSecretKey123!",
                 "Phase1LifetimeSeconds": 28800,
                 "Phase2LifetimeSeconds": 3600,
@@ -194,7 +194,7 @@ aws ec2 create-vpn-connection \
                 "StartupAction": "start"
             },
             {
-                "TunnelInsideCidr": "169.254.0.4/30",
+                "TunnelInsideCidr": "169.254.100.4/30",
                 "PreSharedKey": "labSecretKey456!",
                 "Phase1LifetimeSeconds": 28800,
                 "Phase2LifetimeSeconds": 3600,
@@ -251,10 +251,10 @@ sudo systemctl restart frr
 vtysh << 'EOF'
 configure terminal
 router bgp 65000
- neighbor 169.254.0.1 remote-as 64512
- neighbor 169.254.0.1 description AWS_VPN_Tunnel_1
- neighbor 169.254.0.5 remote-as 64512
- neighbor 169.254.0.5 description AWS_VPN_Tunnel_2
+ neighbor 169.254.100.1 remote-as 64512
+ neighbor 169.254.100.1 description AWS_VPN_Tunnel_1
+ neighbor 169.254.100.5 remote-as 64512
+ neighbor 169.254.100.5 description AWS_VPN_Tunnel_2
  network 172.16.0.0/16
  exit
 write
@@ -269,8 +269,8 @@ vtysh -c "show ip bgp summary"
 
 # Output esperado:
 # Neighbor        V    AS MsgRcvd MsgSent   TblVer  InQ OutQ Up/Down  State/PfxRcd
-# 169.254.0.1     4 64512       0       0        0    0    0 never    Active
-# 169.254.0.5     4 64512       0       0        0    0    0 never    Active
+# 169.254.100.1   4 64512       0       0        0    0    0 never    Active
+# 169.254.100.5   4 64512       0       0        0    0    0 never    Active
 ```
 
 ---
@@ -375,8 +375,8 @@ Al finalizar el lab, el estudiante debe poder verificar cada uno de los siguient
 
 | Túnel | Inside CIDR | Peer Inside IP | Pre-Shared Key |
 |-------|-------------|----------------|----------------|
-| Tunnel 1 | 169.254.0.0/30 | 169.254.0.1 (AWS) / 169.254.0.2 (Cust) | labSecretKey123! |
-| Tunnel 2 | 169.254.0.4/30 | 169.254.0.5 (AWS) / 169.254.0.6 (Cust) | labSecretKey456! |
+| Tunnel 1 | 169.254.100.0/30 | 169.254.100.1 (AWS) / 169.254.100.2 (Cust) | labSecretKey123! |
+| Tunnel 2 | 169.254.100.4/30 | 169.254.100.5 (AWS) / 169.254.100.6 (Cust) | labSecretKey456! |
 
 ---
 

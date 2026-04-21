@@ -159,7 +159,7 @@ def lambda_handler(event, context):
 
 5.3. Configura:
    - **Resource Name**: `user-id`
-   - **Resource Path**: `/users/{id}`
+   - **Resource Path**: `{id}` (solo el segmento relativo al padre; API Gateway construye la ruta completa `/users/{id}` automáticamente)
    - **Enable API Gateway CORS**: Yes
 
 5.4. Haz clic en **Create Resource**
@@ -296,7 +296,10 @@ Para eliminar los recursos creados y evitar costos adicionales:
 2. **Eliminar la función Lambda**:
    - Lambda > Functions > `get-users-function` > Actions > Delete
 
-El rol IAM asociado se eliminará automáticamente al borrar la función Lambda.
+3. **Eliminar el rol IAM**:
+   - IAM > Roles > buscar el rol con prefijo `get-users-function-role-*` > Delete
+
+> **Nota:** AWS **no elimina automáticamente** el rol IAM al borrar la función Lambda. Debe eliminarse manualmente para evitar acumulación de roles huérfanos.
 
 ---
 

@@ -163,15 +163,17 @@ aws s3api head-object --bucket mi-bucket-cifrado-XXXX --key datos.txt
 
 1. Intentar subir un archivo con SSE-S3 (debe fallar):
 ```bash
-aws s3 cp datos.txt s3://mi-bucket-cifrado-XXXX/archivo-sse-s3.txt --sse aes256
+aws s3 cp datos.txt s3://mi-bucket-cifrado-XXXX/archivo-sse-s3.txt --sse AES256
 ```
 
 2. Verificar que la respuesta es **Access Denied**
 
-3. Subir un archivo con SSE-KMS (debe funcionar):
+3. Subir un archivo con SSE-KMS especificando la clave (debe funcionar):
 ```bash
-aws s3 cp datos.txt s3://mi-bucket-cifrado-XXXX/archivo-kms.txt --sse aws:kms
+aws s3 cp datos.txt s3://mi-bucket-cifrado-XXXX/archivo-kms.txt --sse aws:kms --sse-kms-key-id <ARN-de-la-KMS-Key>
 ```
+
+**NOTA**: Es obligatorio indicar `--sse-kms-key-id` porque la bucket policy deniega uploads que no incluyan el header del key ID.
 
 4. Verificar que la subida fue exitosa
 
@@ -186,9 +188,10 @@ aws s3 cp datos.txt s3://mi-bucket-cifrado-XXXX/archivo-kms.txt --sse aws:kms
    - **Time range**: Last 15 minutes
 
 3. Buscar eventos:
-   - `GenerateDataKey`: Cuando se sube un objeto
-   - `Decrypt`: Cuando se descarga un objeto
-   - `Encrypt`: Cuando se cifra un objeto
+   - `GenerateDataKey`: Cuando se sube un objeto (S3 genera la clave de datos)
+   - `Decrypt`: Cuando se descarga un objeto (S3 descifra la clave de datos)
+
+   **NOTA**: S3 SSE-KMS **no genera** el evento `Encrypt`. Solo aparecería si se invocara KMS directamente (`aws kms encrypt`).
 
 4. Hacer clic en un evento para ver los detalles:
    - Verificar `keyId` coincide con la KMS Key creada

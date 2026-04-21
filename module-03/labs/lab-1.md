@@ -118,19 +118,25 @@ Crear una estructura completa de IAM con usuarios para diferentes roles, grupos 
   "Statement": [
     {
       "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::*-bucket-proyecto"
+    },
+    {
+      "Effect": "Allow",
       "Action": [
         "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
+        "s3:PutObject"
       ],
       "Resource": "arn:aws:s3:::*-bucket-proyecto/*"
     },
     {
       "Effect": "Deny",
-      "Action": [
-        "s3:DeleteObject",
-        "s3:DeleteBucket"
-      ],
+      "Action": "s3:DeleteBucket",
+      "Resource": "arn:aws:s3:::*-bucket-proyecto"
+    },
+    {
+      "Effect": "Deny",
+      "Action": "s3:DeleteObject",
       "Resource": "arn:aws:s3:::*-bucket-proyecto/*"
     }
   ]

@@ -201,16 +201,22 @@ aws iam list-users
 1. En CloudTrail Event history, buscar eventos sensibles:
 
    - **IAM Policy changes**:
-     - Filter: `eventSource = iam.amazonaws.com`
-     - Filter: `eventName CONTAINS Policy`
+     - Filter: **Lookup attributes** → Event source = `iam.amazonaws.com`
+     - Revisar manualmente eventos cuyo nombre contenga `Policy` (ej: `CreatePolicy`, `AttachUserPolicy`)
 
    - **S3 Bucket policy changes**:
-     - Filter: `eventSource = s3.amazonaws.com`
-     - Filter: `eventName CONTAINS BucketPolicy`
+     - Filter: **Lookup attributes** → Event source = `s3.amazonaws.com`
+     - Revisar eventos como `PutBucketPolicy`, `DeleteBucketPolicy`
 
-   - **Failed authentications**:
-     - Filter: `errorCode = AccessDenied`
-     - Filter: `errorCode = InvalidAccessKeyId`
+   - **Errores de acceso** (requiere CloudWatch Logs Insights):
+     - Event history **no permite filtrar por `errorCode`** en la UI
+     - Ir a **CloudWatch** > **Logs Insights**, seleccionar el log group del trail y ejecutar:
+     ```
+     fields @timestamp, eventName, errorCode, userIdentity.arn
+     | filter errorCode = "AccessDenied" or errorCode = "InvalidAccessKeyId"
+     | sort @timestamp desc
+     | limit 20
+     ```
 
 2. Seleccionar un evento y revisar:
    - **User identity**: Quién lo hizo

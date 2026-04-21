@@ -54,6 +54,7 @@ Antes de crear el pipeline, necesitas un repositorio de código fuente y el arch
      pre_build:
        commands:
          - echo Logging in to Amazon ECR...
+         - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
          - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
          - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/my-webapp
          - IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
@@ -336,7 +337,7 @@ Al finalizar este lab, debes poder confirmar que:
 |-------|-------|----------|
 | `Build timeout` | El build tarda más de 60 minutos | Aumenta el timeout en la configuración del proyecto o optimiza el Dockerfile |
 | `Access denied error when pushing to ECR` | CodeBuild role sin permisos ECR | Adjunta la política AmazonECRAccessPolicy al service role |
-| `Image not found in task definition` | El archivo imagedefinitions.json no se generó | Verifica que el post_build genera este archivo correctamente |}
+| `Image not found in task definition` | El archivo imagedefinitions.json no se generó | Verifica que el post_build genera este archivo correctamente |
 | `InvalidSignatureException` | Credenciales AWS expiradas o mal configuradas | Verifica que AWS_REGION y AWS_ACCOUNT_ID están definidos en buildspec |
 | `Pipeline not triggering` | CloudWatch Events no configurado | Crea manualmente la regla de CloudWatch Events para el repositorio |
 | `Deploy stage failed` | Task definition no puede ser actualizada | Verifica que el service tiene el rol de ejecución correcto |
