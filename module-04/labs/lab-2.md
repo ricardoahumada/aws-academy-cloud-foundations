@@ -56,6 +56,8 @@ Configurar Amazon Route 53 con diferentes políticas de routing, health checks y
    - **Description**: `Hosted zone for production domain`
 4. Clic en **Create**
 
+> **Nota:** Si no tienes un dominio propio, puedes usar una **Private Hosted Zone** para pruebas internas.
+
 ### 1.2 Delegar DNS al registrado
 
 1. En la hosted zone recién creada, copiar los **NS records** (4 servidores de nombres)
@@ -151,7 +153,27 @@ nslookup mi-dominio.example.com
    - **Evaluate target health**: **Yes**
 3. Clic en **Create records**
 
+> **Nota**: En caso de usar private hosted zone, ejecutar antes de la verificación los siguientes comandos para habilitar DNS en la VPC y asociar la hosted zone:
+```bash
+# Habilitar enableDnsSupport
+aws ec2 modify-vpc-attribute --vpc-id <vpc-id> --enable-dns-support "{\"Value\":true}"
+
+# Habilitar enableDnsHostnames
+aws ec2 modify-vpc-attribute --vpc-id <vpc-id> --enable-dns-hostnames "{\"Value\":true}"
+
+
+# Verificar
+aws ec2 describe-vpc-attribute --vpc-id <vpc-id> --attribute enableDnsSupport
+aws ec2 describe-vpc-attribute --vpc-id <vpc-id> --attribute enableDnsHostnames
+
+# Asociar HZ a VPC
+aws route53 associate-vpc-with-hosted-zone \
+  --hosted-zone-id <HZ-id> \
+  --vpc VPCRegion=us-east-1,VPCId=vpc-086cc4594670150d4
+```
+
 ### 3.3 Verificar Weighted routing
+> **Nota**: En caso de usar private hosted zone, ejecutar desde una instancia en la misma VPC para resolver el DNS correctamente.
 
 ```bash
 # Hacer múltiples requests y contar respuestas
