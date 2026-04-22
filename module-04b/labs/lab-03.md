@@ -209,7 +209,7 @@ aws applicationinsights delete-application \
 
 ---
 
-## Notas sobre Cambios Recientes (Feb 2026)
+## Notas sobre Cambios Recientes (Abr 2026)
 
 - **Application Insights ahora detecta automáticamente** más tipos de recursos incluyendo containers ECS y microservicios EKS
 - **Interfaz mejorada** para la configuración de patrones de log con preview en tiempo real

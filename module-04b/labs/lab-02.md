@@ -36,11 +36,11 @@ Una aplicación web está experimentando tiempos de respuesta lentos y errores i
 Los logs de aplicación deben seguir el formato ACCESS_LOG (Apache/Nginx style):
 
 ```
-2026-04-20T10:30:15.123Z - GET /api/users 200 45ms
-2026-04-20T10:30:16.234Z - POST /api/login 401 12ms
-2026-04-20T10:30:17.345Z - GET /api/products 500 120ms
-2026-04-20T10:30:18.456Z - GET /api/health 200 5ms
-2026-04-20T10:30:19.567Z - GET /api/users/123 200 89ms
+2026-04-22T10:30:15.123Z - GET /api/users 200 45ms
+2026-04-22T10:30:16.234Z - POST /api/login 401 12ms
+2026-04-22T10:30:17.345Z - GET /api/products 500 120ms
+2026-04-22T10:30:18.456Z - GET /api/health 200 5ms
+2026-04-22T10:30:19.567Z - GET /api/users/123 200 89ms
 ```
 
 **Estructura del log:**

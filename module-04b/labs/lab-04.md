@@ -6,6 +6,22 @@
 
 ---
 
+> **Versión mínima para ver trazabilidad de segmentos y subsegmentos**
+>
+> Para observar segmentos, subsegmentos custom y el service map con nodos conectados, los recursos mínimos son:
+>
+> | Recurso | Rol en el tracing |
+> |---------|-------------------|
+> | API Gateway (`POST /orders`) | Segmento raíz — propaga el `trace-id` downstream |
+> | `lambda-orders` | 3 subsegmentos custom: `Validate-Input`, `DynamoDB-PutItem`, `SQS-SendMessage` |
+> | DynamoDB (`Orders`) | Segmento automático via `AWSXRay.captureAWS()` — nodo en el service map |
+>
+> Con este mínimo se obtiene: service map con 3 nodos conectados, subsegmentos custom y captura automática de llamadas AWS.
+>
+> Los componentes `lambda-auth`, SQS y `lambda-notif` son opcionales para este objetivo; amplían el service map pero no son necesarios para demostrar el concepto de tracing distribuido.
+
+---
+
 ## Objetivo del Lab
 
 Implementar tracing distribuido en una aplicación serverless utilizando AWS X-Ray y CloudWatch ServiceLens. Al finalizar, se podrá visualizar el service map completo, identificar latency en subsegmentos específicos y correlacionar traces con logs de CloudWatch.
@@ -31,34 +47,36 @@ Una aplicación serverless está experimentando tiempos de respuesta elevados en
                         ▼
                 ┌───────────────┐
                 │  API Gateway  │
+                │  (OrdersAPI)  │
                 └───────┬───────┘
                         │
-            ┌───────────┴───────────┐
-            ▼                       ▼
+          POST /auth    │    POST /orders
+           ┌────────────┴────────────┐
+           ▼                         ▼
     ┌───────────────┐       ┌───────────────┐
     │  lambda-auth  │       │ lambda-orders │
-    │   (Auth)      │       │   (Orders)    │
-    └───────┬───────┘       └───────┬───────┘
-            │                       │
-            └───────────┬───────────┘
-                        ▼
-                ┌───────────────┐
-                │   DynamoDB    │
-                │  (Orders DB)  │
-                └───────────────┘
-                        │
-                        ▼
-                ┌───────────────┐
-                │lambda-notif   │
-                │ (Notification)│
-                └───────┬───────┘
-                        │
-                        ▼
-                ┌───────────────┐
-                │     SQS       │
-                │   (Queue)     │
-                └───────────────┘
+    │  (validate)   │       │ (write order) │
+    └───────────────┘       └───────┬───────┘
+                                    │
+                        ┌───────────┴───────────┐
+                        ▼                       ▼
+                ┌───────────────┐       ┌───────────────┐
+                │   DynamoDB    │       │     SQS       │
+                │   (Orders)    │       │ NotifQueue    │
+                └───────────────┘       └───────┬───────┘
+                                                │
+                                                ▼
+                                        ┌───────────────┐
+                                        │  lambda-notif │
+                                        │  (process)    │
+                                        └───────────────┘
 ```
+
+Flujo de tracing:
+1. Client → API Gateway `OrdersAPI` (punto de entrada X-Ray)
+2. `POST /auth` → lambda-auth (validación de token, solo subsegmentos internos)
+3. `POST /orders` → lambda-orders → DynamoDB (escritura de pedido)
+4. lambda-orders → SQS NotifQueue → lambda-notif (procesamiento asíncrono)
 
 ---
 
@@ -126,9 +144,105 @@ aws lambda list-functions \
 
 11. Verificar que todas las funciones muestran `Active` en la columna TracingConfig.Mode
 
-### Parte 3: Agregar Subsegmentos Personalizados (Opcional)
+### Parte 3: Generar Trazas de Prueba
 
-12. Para mejorar el tracing, agregar el SDK de X-Ray en las funciones Lambda:
+Para visualizar traces en ServiceLens, es necesario invocar el API Gateway y disparar las funciones Lambda.
+
+12. Obtener la URL del API Gateway:
+
+```bash
+# Verificar que el API Gateway está desplegado y obtener la URL de invoke
+aws apigateway get-stages \
+    --rest-api-id YOUR_API_ID \
+    --query 'item[0].[stageName,invokeUrl]' \
+    --output text
+```
+
+Reemplazar `YOUR_API_ID` con el ID del API Gateway creado en la pre-configuración (ej: `abc123def456`).
+
+La URL base será algo como: `https://{api-id}.execute-api.us-east-1.amazonaws.com/prod`
+
+13. Invocar el endpoint `/orders` para generar traces en lambda-orders:
+
+```bash
+# Primera request - crear un pedido
+curl -X POST \
+  "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/orders" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "items": [{"name": "Widget Pro", "qty": 2, "price": 25.00}],
+    "total": 50.00
+  }'
+
+# Verificar respuesta: statusCode 201 y orderId generado
+```
+
+14. Generar tráfico adicional para populate el service map:
+
+```bash
+# Invocar 5 veces con diferentes payloads para generar traces variados
+for i in 1 2 3 4 5; do
+  echo "Request $i..."
+  curl -s -X POST \
+    "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/orders" \
+    -H "Content-Type: application/json" \
+    -d "{
+      \"userId\": \"user-$i\",
+      \"items\": [{\"name\": \"Item-$i\", \"qty\": $i, \"price\": $((i*10))}],
+      \"total\": $((i*15))
+    }"
+  sleep 1
+done
+```
+
+15. Invocar el endpoint `/auth` para generar traces en lambda-auth:
+
+```bash
+# Request con token válido (Bearer token)
+curl -X POST \
+  "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/auth" \
+  -H "Authorization: Bearer test-token-$(date +%s)" \
+  -H "Content-Type: application/json"
+
+# Request con token inválido (para ver cómo se captura el error en el trace)
+curl -X POST \
+  "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/auth" \
+  -H "Authorization: invalid-token" \
+  -H "Content-Type: application/json"
+```
+
+16. Verificar que las invocaciones generaron logs en CloudWatch:
+
+```bash
+# Monitorear logs de lambda-orders en tiempo real
+aws logs tail "/aws/lambda/lambda-orders" --follow --format json
+
+# En otra terminal, monitorear logs de lambda-auth
+aws logs tail "/aws/lambda/lambda-auth" --follow --format json
+```
+
+17. Confirmar que los traces aparecen en X-Ray (validación inmediata):
+
+```bash
+# Listar traces de los últimos 5 minutos
+START_TIME=$(date -d '5 minutes ago' +%s)
+END_TIME=$(date +%s)
+
+aws xray get-trace-summaries \
+    --start-time $START_TIME \
+    --end-time $END_TIME \
+    --query 'traceSummaries[0:5].[traceId,duration,hasError]' \
+    --output table
+```
+
+Si no hay resultados, esperar 1-2 minutos y repetir (X-Ray puede tardar en indexar).
+
+---
+
+### Parte 4: Agregar Subsegmentos Personalizados (Opcional)
+
+18. Para mejorar el tracing, agregar el SDK de X-Ray en las funciones Lambda:
 
 ```javascript
 // Ejemplo: lambda-orders/index.js
@@ -158,46 +272,46 @@ exports.handler = async (event) => {
 };
 ```
 
-13. Recargar el código de las funciones Lambda si se realizan cambios
+19. Recargar el código de las funciones Lambda si se realizan cambios
 
-### Parte 4: Visualizar Service Map en CloudWatch
+### Parte 5: Visualizar Service Map en CloudWatch
 
-14. En la consola de AWS, navegar a **CloudWatch** > **ServiceLens** > **Service Map**
-15. Esperar 5 minutos para que aparezcan los primeros datos en el service map
-16. Identificar los nodos:
+19. En la consola de AWS, navegar a **CloudWatch** > **ServiceLens** > **Service Map**
+20. Esperar 5 minutos para que aparezcan los primeros datos en el service map
+21. Identificar los nodos:
     - **API Gateway** (punto de entrada)
     - **lambda-auth** (autenticación)
     - **lambda-orders** (procesamiento de pedidos)
     - **lambda-notification** (notificaciones)
     - **DynamoDB** (base de datos)
     - **SQS** (cola de mensajes)
-17. Verificar que las conexiones entre nodos reflejan la arquitectura real
-18. Identificar nodos en color rojo (indica errores) o amarillo (alta latencia)
+22. Verificar que las conexiones entre nodos reflejan la arquitectura real
+23. Identificar nodos en color rojo (indica errores) o amarillo (alta latencia)
 
-### Parte 5: Analizar Traces Específicos
+### Parte 6: Analizar Traces Específicos
 
-19. Navegar a **CloudWatch** > **ServiceLens** > **Traces**
-20. En el filtro de tiempo, seleccionar **Last 30 minutes**
-21. Filtrar por servicio: `service("lambda-orders")`
-22. Seleccionar un trace con **Duration** mayor a 2000ms
-23. Hacer clic en el trace para ver los detalles
-24. Identificar los subsegmentos:
+24. Navegar a **CloudWatch** > **ServiceLens** > **Traces**
+25. En el filtro de tiempo, seleccionar **Last 30 minutes**
+26. Filtrar por servicio: `service("lambda-orders")`
+27. Seleccionar un trace con **Duration** mayor a 2000ms
+28. Hacer clic en el trace para ver los detalles
+29. Identificar los subsegmentos:
     - ¿Cuál subsegmento tiene mayor latencia?
     - ¿Hay algún error en algún subsegmento?
-25. Documentar los hallazgos para troubleshooting
+30. Documentar los hallazgos para troubleshooting
 
-### Parte 6: Correlacionar Trace con Logs
+### Parte 7: Correlacionar Trace con Logs
 
-26. En los detalles del trace, hacer clic en **View logs**
-27. Se abrirá CloudWatch Logs con el filtro `trace_id = "1-xxxxxxxx-xxxxxxxx"`
-28. Analizar los logs del período del trace
-29. Identificar si hay errores o advertencias que correlacionen con la latencia
+31. En los detalles del trace, hacer clic en **View logs**
+32. Se abrirá CloudWatch Logs con el filtro `trace_id = "1-xxxxxxxx-xxxxxxxx"`
+33. Analizar los logs del período del trace
+34. Identificar si hay errores o advertencias que correlacionen con la latencia
 
-### Parte 7: Crear Alarma desde X-Ray Insights
+### Parte 8: Crear Alarma desde X-Ray Insights
 
-30. Navegar a **CloudWatch** > **ServiceLens** > **X-Ray Insights**
-31. Hacer clic en **Create insight**
-32. Configurar las condiciones del insight:
+35. Navegar a **CloudWatch** > **ServiceLens** > **X-Ray Insights**
+36. Hacer clic en **Create insight**
+37. Configurar las condiciones del insight:
 
 | Parámetro | Valor |
 |-----------|-------|
@@ -206,11 +320,11 @@ exports.handler = async (event) => {
 | Period | 5 minutes |
 | Group by | service.name |
 
-33. Hacer clic en **Next**
-34. Configurar la alarma:
+38. Hacer clic en **Next**
+39. Configurar la alarma:
     - **Alarm name**: `X-Ray-HighLatency-{ServiceName}`
     - **SNS Topic**: Seleccionar topic para notificaciones
-35. Hacer clic en **Create alarm**
+40. Hacer clic en **Create alarm**
 
 ---
 
@@ -242,8 +356,8 @@ aws lambda list-functions \
 
 # Obtener traces recent
 aws xray get-trace-summaries \
-    --start-time 1713600000 \
-    --end-time 1713603600
+    --start-time 1745280000 \
+    --end-time 1745283600
 
 # Obtener detalle de un trace específico
 aws xray batch-get-traces \
@@ -290,7 +404,7 @@ aws xray list-sampling-rules
 
 ---
 
-## Notas sobre Cambios Recientes (Feb 2026)
+## Notas sobre Cambios Recientes (Abr 2026)
 
 - **X-Ray SDK v3** ahora permite tracing automático sin modificar código para funciones Lambda con runtime Python, Node.js y Java
 - **ServiceLens integrado en CloudWatch** ahora muestra automáticamente correlaciones con CloudWatch Contributor Insights
