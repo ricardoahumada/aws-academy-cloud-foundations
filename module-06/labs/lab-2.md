@@ -1,4 +1,4 @@
-# Lab 6.2: Pipeline de Procesamiento de Eventos con EventBridge
+# Lab 6.2: Pipeline de Procesamiento de Eventos con EventBridge (OPCIONAL)
 
 ## Objetivo
 
@@ -18,18 +18,18 @@ Implementar un pipeline de procesamiento de eventos utilizando EventBridge como 
 ## Arquitectura del Lab
 
 ```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│  aws events     │────►│  EventBridge    │────►│  Lambda         │
-│  put-events     │     │  Event Bus      │     │  process-order  │
-└─────────────────┘     │                 │     │                 │
-                       │  order-event-bus │     └─────────────────┘
-                       └─────────────────┘             │
-                                                      │ (on failure)
-                                                      ▼
-                                            ┌─────────────────┐
-                                            │  SQS FIFO       │
-                                            │  DLQ            │
-                                            └─────────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  aws events     │────►│  EventBridge     │────►│  Lambda         │
+│  put-events     │     │  Event Bus       │     │  process-order  │
+└─────────────────┘     │                  │     │                 │
+                        │  order-event-bus │     └─────────────────┘
+                        └──────────────────┘             │
+                                                         │ (on failure)
+                                                         ▼
+                                              ┌─────────────────┐
+                                              │  SQS FIFO       │
+                                              │  DLQ            │
+                                              └─────────────────┘
 ```
 
 ## Recursos creados

@@ -246,6 +246,69 @@ def lambda_handler(event, context):
 1. En la sección **Function overview**, verificar que aparezca el trigger SQS
 2. El estado debe ser **Enabled**
 
+### 4.3 Actualizar permisos del rol de ejecución de Lambda
+
+> **Error común:** `The function execution role does not have permissions to call ReceiveMessage on SQS`
+>
+> Al crear un trigger SQS, Lambda necesita permisos explícitos para leer y eliminar mensajes de la cola.
+
+#### Permisos SQS necesarios
+
+```bash
+# Obtener el nombre del rol de ejecución
+ROLE_NAME=$(aws lambda get-function-configuration \
+  --function-name procesar-orden \
+  --query 'Role' --output text | cut -d'/' -f2)
+
+# Crear política inline con permisos SQS
+aws iam put-role-policy \
+  --role-name "$ROLE_NAME" \
+  --policy-name SQSPermissions \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": ["sqs:ReceiveMessage", "sqs:GetQueueAttributes", "sqs:DeleteMessage"],
+        "Resource": "arn:aws:sqs:<region>:<account>:ordenes-procesamiento.fifo"
+      },
+      {
+        "Effect": "Allow",
+        "Action": ["sqs:ReceiveMessage", "sqs:GetQueueAttributes", "sqs:DeleteMessage"],
+        "Resource": "arn:aws:sqs:<region>:<account>:ordenes-dlq.fifo"
+      }
+    ]
+  }'
+```
+
+#### Permisos SNS necesarios (para notificaciones)
+
+```bash
+# Agregar permisos SNS para publicar notificaciones
+aws iam put-role-policy \
+  --role-name "$ROLE_NAME" \
+  --policy-name SNSPermissions \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "sns:Publish",
+        "Resource": "arn:aws:sns:<region>:<account>:notificaciones-ordenes"
+      }
+    ]
+  }'
+```
+
+#### Verificar permisos
+
+```bash
+# Listar políticas del rol
+aws iam list-role-policies --role-name "$ROLE_NAME"
+```
+
+> **Nota:** Si prefieres crear políticas gestionadas en lugar de inline, crea un managed policy y adjántala al rol de ejecución.
+
 ---
 
 ## Paso 5: Configurar DLQ para Lambda (Manejo de Errores)

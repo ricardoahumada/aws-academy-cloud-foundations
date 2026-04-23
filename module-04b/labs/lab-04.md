@@ -240,78 +240,149 @@ Si no hay resultados, esperar 1-2 minutos y repetir (X-Ray puede tardar en index
 
 ---
 
-### Parte 4: Agregar Subsegmentos Personalizados (Opcional)
+### Parte 4: Verificar Tracing Automático (Sin SDK)
 
-18. Para mejorar el tracing, agregar el SDK de X-Ray en las funciones Lambda:
+> **✅ Concepto clave:** Con **Active Tracing habilitado**, Lambda traza automáticamente todas las llamadas a servicios AWS (DynamoDB, SQS, S3, etc.) **sin necesidad de instalar el SDK de X-Ray**.
+>
+> **No es necesario:**
+> - Instalar `aws-xray-sdk` ni `aws-xray-sdk-core`
+> - Modificar el código de las funciones Lambda
+> - Crear Lambda Layers para X-Ray
+>
+> **Lo que se traza automáticamente:**
+> - Llamadas a DynamoDB (`PutCommand`, `GetCommand`, etc.)
+> - Envíos a SQS (`SendMessageCommand`)
+> - Operaciones en S3, SNS, Kinesis, Step Functions, etc.
+> - Invocaciones de Lambda a Lambda
+> - Llamadas HTTP externas (parcialmente)
+
+18. Verificar que el código de `lambda-orders` usa **solo AWS SDK v3** (sin X-Ray SDK):
 
 ```javascript
-// Ejemplo: lambda-orders/index.js
-const AWSXRay = require('aws-xray-sdk');
-const AWS = AWSXRay.captureAWS(require('aws-sdk'));
+// lambda-orders/index.mjs
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 
-exports.handler = async (event) => {
-    // Obtener el segmento actual
-    const segment = AWSXRay.getSegment();
-    
-    // Subsegmento para llamada a DynamoDB
-    const dynamoSubsegment = segment.addNewSubsegment('DynamoDB-GetItem');
+// ❌ NO importar aws-xray-sdk - no es necesario con Active Tracing
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+
+export const handler = async (event) => {
+    let body = {};
+    if (event.body) {
+        body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+    } else if (event.userId) {
+        body = event;
+    }
     
     try {
-        // Llamada a DynamoDB
-        const result = await dynamodb.getItem({
-            TableName: process.env.ORDERS_TABLE,
-            Key: { orderId: event.pathParameters.orderId }
-        }).promise();
+        const orderId = `order-${Date.now()}`;
+        const timestamp = new Date().toISOString();
         
-        dynamoSubsegment.close();
-        return result;
+        const order = {
+            orderId,
+            userId: body.userId || 'user-default',
+            items: body.items || [],
+            total: body.total || 0,
+            status: 'pending',
+            createdAt: timestamp
+        };
+        
+        // ✅ Con Active Tracing, esto se traza automáticamente como subsegmento "DynamoDB"
+        await docClient.send(new PutCommand({
+            TableName: process.env.ORDERS_TABLE || 'Orders',
+            Item: order
+        }));
+        
+        // ✅ Con Active Tracing, esto se traza automáticamente como subsegmento "SQS"
+        if (process.env.NOTIFICATIONS_QUEUE_URL) {
+            const sqs = new SQSClient({});
+            await sqs.send(new SendMessageCommand({
+                QueueUrl: process.env.NOTIFICATIONS_QUEUE_URL,
+                MessageBody: JSON.stringify({
+                    type: 'ORDER_CREATED',
+                    orderId,
+                    timestamp
+                }),
+                MessageGroupId: 'order-notifications',
+                MessageDeduplicationId: orderId
+            }));
+        }
+        
+        return {
+            statusCode: 201,
+            body: JSON.stringify({ success: true, orderId })
+        };
     } catch (err) {
-        dynamoSubsegment.close(err);
+        console.error('Error processing order:', err);
         throw err;
     }
 };
 ```
 
-19. Recargar el código de las funciones Lambda si se realizan cambios
+19. **Verificar que NO hay import de `aws-xray-sdk`** en ninguna función Lambda
+
+20. Generar tráfico adicional para verificar subsegmentos automáticos:
+
+```bash
+# Invocar 3 veces para generar traces con subsegmentos
+for i in 1 2 3; do
+  curl -s -X POST \
+    "https://YOUR_API_ID.execute-api.us-east-1.amazonaws.com/prod/orders" \
+    -H "Content-Type: application/json" \
+    -d "{\"userId\": \"test-$i\", \"items\": [{\"name\": \"Item\"}], \"total\": 10}"
+  sleep 2
+done
+```
+
+21. Esperar 2-3 minutos y verificar en **CloudWatch** > **ServiceLens** > **Traces**:
+    - Seleccionar un trace reciente
+    - Expandir el segmento de `lambda-orders`
+    - Verificar que aparecen subsegmentos **DynamoDB** y **SQS** generados automáticamente
+    - Cada subsegmento mostrará: duración, tabla/cola afectada, errores (si los hay)
+
+> **💡 Tip:** Si necesitas subsegmentos custom para medir lógica de negocio (ej: validaciones complejas, cálculos), consulta el anexo "Advanced: Custom Subsegments" al final del lab. Para el 95% de casos, el tracing automático es suficiente.
 
 ### Parte 5: Visualizar Service Map en CloudWatch
 
-19. En la consola de AWS, navegar a **CloudWatch** > **ServiceLens** > **Service Map**
-20. Esperar 5 minutos para que aparezcan los primeros datos en el service map
-21. Identificar los nodos:
+22. En la consola de AWS, navegar a **CloudWatch** > **ServiceLens** > **Service Map**
+23. Esperar 5 minutos para que aparezcan los primeros datos en el service map
+24. Identificar los nodos:
     - **API Gateway** (punto de entrada)
     - **lambda-auth** (autenticación)
     - **lambda-orders** (procesamiento de pedidos)
     - **lambda-notification** (notificaciones)
     - **DynamoDB** (base de datos)
     - **SQS** (cola de mensajes)
-22. Verificar que las conexiones entre nodos reflejan la arquitectura real
-23. Identificar nodos en color rojo (indica errores) o amarillo (alta latencia)
+25. Verificar que las conexiones entre nodos reflejan la arquitectura real
+26. Identificar nodos en color rojo (indica errores) o amarillo (alta latencia)
 
 ### Parte 6: Analizar Traces Específicos
 
-24. Navegar a **CloudWatch** > **ServiceLens** > **Traces**
-25. En el filtro de tiempo, seleccionar **Last 30 minutes**
-26. Filtrar por servicio: `service("lambda-orders")`
-27. Seleccionar un trace con **Duration** mayor a 2000ms
-28. Hacer clic en el trace para ver los detalles
-29. Identificar los subsegmentos:
+27. Navegar a **CloudWatch** > **ServiceLens** > **Traces**
+28. En el filtro de tiempo, seleccionar **Last 30 minutes**
+29. Filtrar por servicio: `service("lambda-orders")`
+30. Seleccionar un trace con **Duration** mayor a 2000ms
+31. Hacer clic en el trace para ver los detalles
+32. Identificar los subsegmentos:
     - ¿Cuál subsegmento tiene mayor latencia?
     - ¿Hay algún error en algún subsegmento?
-30. Documentar los hallazgos para troubleshooting
+33. Documentar los hallazgos para troubleshooting
 
 ### Parte 7: Correlacionar Trace con Logs
 
-31. En los detalles del trace, hacer clic en **View logs**
-32. Se abrirá CloudWatch Logs con el filtro `trace_id = "1-xxxxxxxx-xxxxxxxx"`
-33. Analizar los logs del período del trace
-34. Identificar si hay errores o advertencias que correlacionen con la latencia
+34. En los detalles del trace, hacer clic en **View logs**
+35. Se abrirá CloudWatch Logs con el filtro `trace_id = "1-xxxxxxxx-xxxxxxxx"`
+36. Analizar los logs del período del trace
+37. Identificar si hay errores o advertencias que correlacionen con la latencia
 
 ### Parte 8: Crear Alarma desde X-Ray Insights
 
-35. Navegar a **CloudWatch** > **ServiceLens** > **X-Ray Insights**
-36. Hacer clic en **Create insight**
-37. Configurar las condiciones del insight:
+38. Navegar a **CloudWatch** > **ServiceLens** > **X-Ray Insights**
+39. Hacer clic en **Create insight**
+40. Configurar las condiciones del insight:
 
 | Parámetro | Valor |
 |-----------|-------|
@@ -320,11 +391,11 @@ exports.handler = async (event) => {
 | Period | 5 minutes |
 | Group by | service.name |
 
-38. Hacer clic en **Next**
-39. Configurar la alarma:
+41. Hacer clic en **Next**
+42. Configurar la alarma:
     - **Alarm name**: `X-Ray-HighLatency-{ServiceName}`
     - **SNS Topic**: Seleccionar topic para notificaciones
-40. Hacer clic en **Create alarm**
+43. Hacer clic en **Create alarm**
 
 ---
 
@@ -397,7 +468,8 @@ aws xray list-sampling-rules
 | Error | Causa | Solución |
 |-------|-------|----------|
 | Service Map vacío | X-Ray daemon no está corriendo | Verificar que Lambda tiene permisos para X-Ray |
-| Sin subsegmentos | Falta AWS X-Ray SDK en el código | Agregar `aws-xray-sdk-core` como dependency |
+| Sin subsegmentos automáticos | Active Tracing no habilitado | Habilitar Active Tracing en configuración de Lambda |
+| `Cannot find package 'aws-xray-sdk'` | Import innecesario del SDK | Eliminar import — Active Tracing funciona sin SDK |
 | Latencia no aparece | Esperar más tiempo para datos | Esperar 5-10 minutos para primera agregación |
 | Trace no muestra logs | Logs no tienen trace ID | Verificar que CloudWatch Logs está configurado |
 | Permission denied | Rol de Lambda sin permisos X-Ray | Agregar policy `AWSXRayDaemonWriteAccess` al rol |
@@ -418,3 +490,209 @@ aws xray list-sampling-rules
 - [Documentación CloudWatch ServiceLens](https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/ServiceLens.html)
 - [AWS X-Ray SDK GitHub](https://github.com/aws/aws-xray-sdk-node)
 - [X-Ray Workshop](https://catalog.workshops.aws/xray)
+
+---
+
+## Anexo: Subsegmentos Custom Avanzados (Opcional)
+
+> **⚠️ Solo para casos avanzados:** Esta sección es para estudiantes que necesiten medir lógica de negocio específica que **no** sea una llamada a servicios AWS. Para el 95% de casos, el tracing automático de la Parte 4 es suficiente.
+
+### Cuándo Usar Subsegmentos Custom
+
+Usa subsegmentos custom SOLO para:
+- Validaciones complejas de negocio (ej: validar 100+ campos)
+- Algoritmos computacionales pesados (ej: cálculos matemáticos)
+- Llamadas HTTP a APIs externas (no AWS)
+- Procesamiento de imágenes o archivos grandes
+
+**NO uses subsegmentos custom para:**
+- Llamadas a DynamoDB, S3, SQS → ya se trazan automáticamente
+- Logging simple con `console.log` → no aporta valor
+- Operaciones rápidas < 10ms → ruido innecesario
+
+### Implementación con CommonJS (Recomendado)
+
+El SDK de X-Ray no soporta ES Modules nativamente. Usa **CommonJS** (`.cjs`) para subsegmentos custom:
+
+```javascript
+// lambda-orders/index.cjs
+const AWSXRay = require('aws-xray-sdk-core');
+const { DynamoDBClient } = require('@aws-sdk/client-dynamodb');
+const { DynamoDBDocumentClient, PutCommand } = require('@aws-sdk/lib-dynamodb');
+const { SQSClient, SendMessageCommand } = require('@aws-sdk/client-sqs');
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+
+exports.handler = async (event) => {
+    const segment = AWSXRay.getSegment();
+    
+    let body = {};
+    if (event.body) {
+        body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
+    } else if (event.userId) {
+        body = event;
+    }
+    
+    try {
+        // ✅ Subsegmento custom: Validación de negocio
+        const validateSegment = segment.addNewSubsegment('Business-Validation');
+        validateSegment.addAnnotation('userId', body.userId);
+        validateSegment.addMetadata('items', body.items);
+        
+        // Simular validación compleja (ej: verificar inventario, precios, descuentos)
+        if (!body.userId || !body.items || body.items.length === 0) {
+            validateSegment.addError(new Error('Invalid order data'));
+            validateSegment.close();
+            throw new Error('Invalid order data');
+        }
+        validateSegment.close();
+        
+        const orderId = `order-${Date.now()}`;
+        const timestamp = new Date().toISOString();
+        
+        const order = {
+            orderId,
+            userId: body.userId,
+            items: body.items,
+            total: body.total || 0,
+            status: 'pending',
+            createdAt: timestamp
+        };
+        
+        // ✅ DynamoDB se traza automáticamente (no necesita subsegmento custom)
+        await docClient.send(new PutCommand({
+            TableName: process.env.ORDERS_TABLE || 'Orders',
+            Item: order
+        }));
+        
+        // ✅ SQS se traza automáticamente (no necesita subsegmento custom)
+        if (process.env.NOTIFICATIONS_QUEUE_URL) {
+            const sqs = new SQSClient({});
+            await sqs.send(new SendMessageCommand({
+                QueueUrl: process.env.NOTIFICATIONS_QUEUE_URL,
+                MessageBody: JSON.stringify({
+                    type: 'ORDER_CREATED',
+                    orderId,
+                    timestamp
+                }),
+                MessageGroupId: 'order-notifications',
+                MessageDeduplicationId: orderId
+            }));
+        }
+        
+        return {
+            statusCode: 201,
+            body: JSON.stringify({ success: true, orderId })
+        };
+    } catch (err) {
+        segment.addError(err);
+        segment.close();
+        throw err;
+    }
+};
+```
+
+### Crear Lambda Layer para X-Ray SDK
+
+**Paso 1: Crear la capa localmente**
+```bash
+# Crear estructura de directorios
+mkdir -p xray-layer/nodejs
+cd xray-layer/nodejs
+
+# Instalar dependencias
+npm init -y
+npm install aws-xray-sdk-core
+
+# Crear ZIP
+cd ..
+zip -r xray-layer.zip nodejs/
+```
+
+**Paso 2: Publicar en AWS**
+```bash
+aws lambda publish-layer-version \
+    --layer-name xray-sdk-core \
+    --zip-file fileb://xray-layer.zip \
+    --compatible-runtimes nodejs20.x nodejs22.x nodejs24.x \
+    --description "AWS X-Ray SDK for custom subsegments"
+```
+
+**Paso 3: Asociar a la función**
+```bash
+# Obtener ARN de la layer
+LAYER_ARN=$(aws lambda list-layer-versions \
+    --layer-name xray-sdk-core \
+    --query 'LayerVersions[0].LayerVersionArn' \
+    --output text)
+
+# Asociar a lambda-orders
+aws lambda update-function-configuration \
+    --function-name lambda-orders \
+    --layers $LAYER_ARN
+```
+
+**Paso 4: Cambiar handler de la función**
+```bash
+# Si usas .cjs en lugar de .mjs
+aws lambda update-function-configuration \
+    --function-name lambda-orders \
+    --handler index.handler
+```
+
+### Annotations vs Metadata
+
+| Tipo | Indexado | Filtrable | Uso |
+|------|----------|-----------|-----|
+| **Annotation** | ✅ Sí | ✅ Sí | IDs, status codes, categorías (max 50 chars) |
+| **Metadata** | ❌ No | ❌ No | Objetos complejos, payloads, debugging |
+
+**Ejemplo:**
+```javascript
+const segment = AWSXRay.getSegment();
+const subsegment = segment.addNewSubsegment('ProcessOrder');
+
+// ✅ Annotation: para filtrar en ServiceLens
+subsegment.addAnnotation('orderType', 'premium');
+subsegment.addAnnotation('customerId', 'cust-12345');
+
+// ✅ Metadata: para debugging (no filtrable)
+subsegment.addMetadata('orderDetails', {
+    items: order.items,
+    paymentMethod: order.payment,
+    shippingAddress: order.address
+});
+
+subsegment.close();
+```
+
+### Verificar Subsegmentos Custom en ServiceLens
+
+1. Invocar la función con el código actualizado
+2. Esperar 2-3 minutos
+3. **CloudWatch** > **ServiceLens** > **Traces**
+4. Seleccionar un trace reciente
+5. Expandir el segmento de `lambda-orders`
+6. Verificar que aparece el subsegmento `Business-Validation`
+7. Click en el subsegmento para ver annotations y metadata
+
+### Filtrar por Annotations
+
+```bash
+# Buscar traces donde orderType = 'premium'
+aws xray get-trace-summaries \
+    --start-time $(date -d '1 hour ago' +%s) \
+    --end-time $(date +%s) \
+    --filter-expression 'annotation.orderType = "premium"'
+```
+
+### Recordatorio Final
+
+**Para la mayoría de estudiantes:**  
+✅ Usar **Active Tracing** sin SDK (Parte 4) es suficiente  
+❌ No necesitas subsegmentos custom para llamadas AWS  
+
+**Solo si necesitas medir lógica de negocio:**  
+✅ Usa subsegmentos custom con `.cjs` y Lambda Layer  
+✅ Usa annotations para filtrar y metadata para debugging

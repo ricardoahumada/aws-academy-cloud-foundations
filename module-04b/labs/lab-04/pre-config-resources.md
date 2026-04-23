@@ -118,30 +118,21 @@ aws sqs create-queue \
 4. Reemplazar el código con:
 
 ```javascript
-// lambda-auth/index.js
-const AWSXRay = require('aws-xray-sdk');
-
-exports.handler = async (event) => {
-    const segment = AWSXRay.getSegment();
-    
+// lambda-auth/index.mjs
+export const handler = async (event) => {
     // Validar token de autorización (simulado)
     const authHeader = event.headers?.Authorization || event.authorizationToken;
-    
-    const subsegment = segment.addNewSubsegment('Validate-Token');
     
     try {
         // Simulación de validación
         const isValid = authHeader && authHeader.startsWith('Bearer ');
         
         if (!isValid) {
-            subsegment.close(new Error('Invalid token'));
             return {
                 statusCode: 401,
                 body: JSON.stringify({ error: 'Unauthorized' })
             };
         }
-        
-        subsegment.close();
         
         return {
             statusCode: 200,
@@ -152,7 +143,7 @@ exports.handler = async (event) => {
             })
         };
     } catch (err) {
-        subsegment.close(err);
+        console.error('Error:', err);
         throw err;
     }
 };
@@ -206,24 +197,19 @@ aws lambda create-function \
 
 **Código:**
 ```javascript
-// lambda-orders/index.js
-const AWSXRay = require('aws-xray-sdk');
-const AWS = AWSXRay.captureAWS(require('aws-sdk'));
-const docClient = new AWS.DynamoDB.DocumentClient();
+// lambda-orders/index.mjs
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, PutCommand } from '@aws-sdk/lib-dynamodb';
+import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
 
 const ORDERS_TABLE = process.env.ORDERS_TABLE || 'Orders';
 const NOTIFICATIONS_QUEUE_URL = process.env.NOTIFICATIONS_QUEUE_URL;
 
-exports.handler = async (event) => {
-    const segment = AWSXRay.getSegment();
-    
-    // Subsegmento: Validación de input
-    const validateSegment = segment.addNewSubsegment('Validate-Input');
+export const handler = async (event) => {
     const body = typeof event.body === 'string' ? JSON.parse(event.body) : event.body;
-    validateSegment.close();
-    
-    // Subsegmento: Query a DynamoDB
-    const dynamoSegment = segment.addNewSubsegment('DynamoDB-PutItem');
     
     try {
         const orderId = `order-${Date.now()}`;
@@ -238,29 +224,26 @@ exports.handler = async (event) => {
             createdAt: timestamp
         };
         
-        await docClient.put({
+        // ✅ Correcto: send(new PutCommand())
+        await docClient.send(new PutCommand({
             TableName: ORDERS_TABLE,
             Item: order
-        }).promise();
+        }));
         
-        dynamoSegment.close();
-        
-        // Enviar a SQS para notificación asíncrona
         if (NOTIFICATIONS_QUEUE_URL) {
-            const sqsSegment = segment.addNewSubsegment('SQS-SendMessage');
-            const sqs = new AWS.SQS();
+            const sqs = new SQSClient({});
             
-            await sqs.sendMessage({
+            await sqs.send(new SendMessageCommand({
                 QueueUrl: NOTIFICATIONS_QUEUE_URL,
                 MessageBody: JSON.stringify({
                     type: 'ORDER_CREATED',
                     orderId,
                     userId: order.userId,
                     timestamp
-                })
-            }).promise();
-            
-            sqsSegment.close();
+                }),
+                MessageGroupId: 'order-notifications',
+                MessageDeduplicationId: orderId
+            }));
         }
         
         return {
@@ -268,12 +251,7 @@ exports.handler = async (event) => {
             body: JSON.stringify({ success: true, orderId, order })
         };
     } catch (err) {
-        dynamoSegment.close(err);
-        
-        if (err.code === 'ConditionalCheckFailedException') {
-            return { statusCode: 409, body: JSON.stringify({ error: 'Order already exists' }) };
-        }
-        
+        console.error('Error:', err);
         throw err;
     }
 };
@@ -283,24 +261,41 @@ exports.handler = async (event) => {
 - `ORDERS_TABLE`: `Orders`
 - `NOTIFICATIONS_QUEUE_URL`: URL de la cola SQS creada (ej: `https://sqs.us-east-1.amazonaws.com/123456789012/NotificationsQueue`)
 
+**Política IAM necesaria para DynamoDB:**
+```json
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "dynamodb:PutItem",
+                "dynamodb:GetItem",
+                "dynamodb:Query",
+                "dynamodb:Scan"
+            ],
+            "Resource": "arn:aws:dynamodb:us-east-1:862087104163:table/Orders"
+        },
+        {
+            "Effect": "Allow",
+            "Action": [
+                "sqs:SendMessage"
+            ],
+            "Resource": "arn:aws:sqs:us-east-1:862087104163:*"
+        }
+    ]
+}
+```
+
+
 #### 3.3 lambda-notif
 
 **Código:**
 ```javascript
-// lambda-notif/index.js
-const AWSXRay = require('aws-xray-sdk');
-const AWS = AWSXRay.captureAWS(require('aws-sdk'));
-const sqs = new AWS.SQS();
-
-const NOTIFICATIONS_QUEUE_URL = process.env.NOTIFICATIONS_QUEUE_URL;
-
-exports.handler = async (event) => {
-    const segment = AWSXRay.getSegment();
-    
+// lambda-notif/index.mjs
+export const handler = async (event) => {
     // Este handler recibe mensajes de SQS (triggers)
     const messages = event.Records || [];
-    
-    const processSegment = segment.addNewSubsegment('Process-Messages');
     
     let processedCount = 0;
     let errorCount = 0;
@@ -322,8 +317,6 @@ exports.handler = async (event) => {
             errorCount++;
         }
     }
-    
-    processSegment.close();
     
     return {
         statusCode: 200,
@@ -376,6 +369,7 @@ exports.handler = async (event) => {
    - Seleccionar `/orders` > Actions > Create Method > **POST**
    - Integration type: **Lambda Function**
    - **Lambda function**: `lambda-orders`
+   - IMPORTANTE: Marcar ✅ "Use Lambda Proxy integration"
    - Hacer clic en **OK**
 
 8. **Habilitar CORS:**
