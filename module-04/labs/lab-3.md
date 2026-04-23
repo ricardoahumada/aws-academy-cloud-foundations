@@ -46,6 +46,11 @@ Al finalizar, comprenderás cómo:
 
 ---
 
+## Paso 0: Activar AWS Config
+- Antes de comenzar, activar AWS Config para observar configuración de los recursos y monitorear su cambios.
+- Ir a AWS Config > Resources > Burcar recursos > Seleccionar un recurso
+
+
 ## Paso 1: Crear el Template de CloudFormation
 
 ### 1.1 Crear archivo de template
