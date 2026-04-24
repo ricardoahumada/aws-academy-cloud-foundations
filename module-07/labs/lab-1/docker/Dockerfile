@@ -4,7 +4,7 @@
 # ============================================
 
 # Usar imagen base oficial de nginx
-FROM nginx:1.25-alpine
+FROM nginx:1.27-alpine
 
 # ============================================
 # Metadata
@@ -12,6 +12,11 @@ FROM nginx:1.25-alpine
 LABEL maintainer="AWS Academy"
 LABEL description="Web application for ECS Fargate deployment"
 LABEL version="1.0"
+
+# ============================================
+# Instalar dependencias del sistema
+# ============================================
+RUN apk add --no-cache curl
 
 # ============================================
 # Variables de Build
@@ -49,21 +54,13 @@ ENV NODE_ENV=${NODE_ENV} \
 # ============================================
 # Exponer puertos
 # ============================================
-EXPOSE 80 443
+EXPOSE 80
 
 # ============================================
 # Healthcheck
 # ============================================
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD /usr/local/bin/health-check
-
-# ============================================
-# Usuario no root (buenas prácticas)
-# ============================================
-RUN addgroup -g 1001 -S appgroup && \
-    adduser -u 1001 -S appuser -G appgroup
-
-USER appuser
 
 # ============================================
 # Comando de inicio

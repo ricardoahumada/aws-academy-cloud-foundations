@@ -10,29 +10,18 @@ env:
     AWS_REGION: us-east-1
     ECR_REPOSITORY_NAME: my-webapp
     ECS_CLUSTER_NAME: my-cluster
-    ECS_SERVICE_NAME: my-service
-    ECS_TASK_DEFINITION: task-def.json
+    ECS_SERVICE_NAME: my-webapp-service
+    ECS_TASK_FAMILY: my-webapp-task
 
-  parameter-store:
-    # Parámetros seguros desde Systems Manager Parameter Store
-    DOCKER_HUB_TOKEN: /prod/docker-hub/token
 
 phases:
   # ============================================
   # Fase 1: Instalación de dependencias
   # ============================================
   install:
-    runtime-versions:
-      docker: 20
     commands:
       - echo "=== Instalando dependencias ==="
-      - apt-get update -y
-      - apt-get install -y python3-pip jq unzip
-      - pip3 install --upgrade awscli
-      # Instalar Amazon ECS CLI
-      - curl -s https://amazon-ecs-cli.s3.amazonaws.com/ecs-cli-linux-amd64-latest -o /tmp/ecs-cli
-      - chmod +x /tmp/ecs-cli
-      - mv /tmp/ecs-cli /usr/local/bin/ecs-cli
+      - yum install -y jq
 
   # ============================================
   # Fase 2: Pre-build - Preparar contexto
@@ -57,7 +46,6 @@ phases:
   build:
     commands:
       - echo "=== Construyendo imagen Docker ==="
-      - cd app
       - IMAGE_TAG=${CODEBUILD_BUILD_NUMBER}
       - FULL_IMAGE_NAME=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:${IMAGE_TAG}
       - FULL_IMAGE_NAME_LATEST=${ECR_REGISTRY}/${ECR_REPOSITORY_NAME}:latest
@@ -86,8 +74,8 @@ phases:
       
       - echo "=== Actualizando Task Definition ==="
       # Obtener task definition actual
-      - TASK_DEF=$(aws ecs describe-task-definition --task-definition ${ECS_TASK_DEFINITION} --region ${AWS_REGION})
-      - TASK_FAMILY=$(echo ${TASK_DEF} | jq -r '.taskDefinition.family')
+      - TASK_DEF=$(aws ecs describe-task-definition --task-definition ${ECS_TASK_FAMILY} --region ${AWS_REGION})
+      - TASK_FAMILY=${ECS_TASK_FAMILY}
       - TASK_REVISION=$(echo ${TASK_DEF} | jq -r '.taskDefinition.taskDefinitionArn')
       
       # Crear nueva revision
@@ -124,6 +112,9 @@ phases:
           --services ${ECS_SERVICE_NAME} \
           --region ${AWS_REGION} \
           --query 'services[0].deployments'
+      
+      - echo "=== Generando imagedefinitions.json para CodePipeline ==="
+      - printf '[{"name":"webapp","imageUri":"%s"}]' ${FULL_IMAGE_NAME} > imagedefinitions.json
 
 # ============================================
 # Artefacts - Guardar para siguientes stages
@@ -139,5 +130,5 @@ artifacts:
 # ============================================
 logs:
   cloudwatch:
-    log-group: /aws/codebuild/${PROJECT_NAME}
+    log-group: /aws/codebuild/webapp-build
     stream-prefix: build

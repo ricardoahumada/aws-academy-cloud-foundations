@@ -23,9 +23,10 @@ Desplegar una aplicación web en contenedores usando Amazon ECS con launch type 
 
 ## Recursos Necesarios
 
-- Aplicación web de ejemplo (proporcionada en el directorio `app/`)
+- Aplicación web de ejemplo (proporcionada en `module-07/labs/lab-1/app/dist/`)
 - VPC con al menos 2 subnets privadas en diferentes AZs
-- Security Group con inbound en puerto 8000 (contenedor) y puerto 80 (ALB)
+- Security Group del ALB con inbound en puerto 80 desde Internet (0.0.0.0/0)
+- Security Group de las tareas ECS con inbound en puerto 80 desde el Security Group del ALB
 
 ---
 
@@ -57,9 +58,9 @@ En este paso crearás un repositorio privado en Amazon ECR para almacenar tu ima
 
 En este paso construirás la imagen Docker localmente y la subirás a tu repositorio ECR.
 
-2.1. Abre una terminal y navega al directorio de la aplicación:
+2.1. Abre una terminal y navega al directorio del laboratorio:
    ```bash
-   cd app/
+   cd module-07/labs/lab-1/
    ```
 
 2.2. autentícate en ECR:
@@ -68,9 +69,9 @@ En este paso construirás la imagen Docker localmente y la subirás a tu reposit
    ```
    Deberías ver el mensaje: `Login Succeeded`
 
-2.3. Construye la imagen Docker:
+2.3. Construye la imagen Docker (especificando el Dockerfile en el subdirectorio docker/):
    ```bash
-   docker build -t my-webapp:latest .
+   docker build -f docker/Dockerfile -t my-webapp:latest .
    ```
 
 2.4. Etiqueta la imagen para ECR:
@@ -134,7 +135,7 @@ La task definition es el blueprint que define cómo se ejecutará tu contenedor.
    - **Container name**: `webapp`
    - **Image**: Pega la URI de tu imagen ECR: `<account-id>.dkr.ecr.us-east-1.amazonaws.com/my-webapp:latest`
    - **Port mappings**:
-     - **Container port**: `8000`
+     - **Container port**: `80`
      - **Protocol**: `tcp`
    - **Essential container**: Verificado (yes)
    - **Environment**:
@@ -147,7 +148,7 @@ La task definition es el blueprint que define cómo se ejecutará tu contenedor.
 
 ### Paso 5: Crear Service con Application Load Balancer
 
-En este paso crearás un ECS Service que mantendrárunning tus tareas y las distribuirá con un ALB.
+En este paso crearás un ECS Service que mantendrá running tus tareas y las distribuirá con un ALB.
 
 5.1. Ve a tu cluster `my-cluster` y haz clic en la pestaña **"Services"**.
 
@@ -168,7 +169,10 @@ En este paso crearás un ECS Service que mantendrárunning tus tareas y las dist
 5.5. En **"Network configuration"**:
    - **Cluster VPC**: Selecciona la VPC que creaste (`10.0.0.0/16`)
    - **Subnets**: Selecciona las 2 subnets privadas
-   - **Security group**: Crea uno nuevo con regla inbound para `8000` desde el CIDR de la VPC (`10.0.0.0/16`)
+   - **Security group**: Crea uno nuevo llamado `ecs-tasks-sg` con regla inbound:
+     - **Type**: `HTTP`
+     - **Port**: `80`
+     - **Source**: Security Group del ALB (se creará en el paso siguiente, podrás editarlo después)
    - **Auto-assign public IP**: `DISABLE`
 
 5.6. En **"Load balancing"**:
@@ -178,9 +182,10 @@ En este paso crearás un ECS Service que mantendrárunning tus tareas y las dist
    - **Target group name**: `my-webapp-tg`
 
 5.7. En **"Container to load balance"**:
-   - Verifica que `webapp:8000` está listado
+   - Verifica que `webapp:80` está listado
    - **Production listener port**: `80:HTTP`
    - **Target group**: `my-webapp-tg`
+   - **Health check path**: `/health`
 
 5.8. Haz clic en **"Create"**.
 
@@ -188,54 +193,85 @@ En este paso crearás un ECS Service que mantendrárunning tus tareas y las dist
 
 ---
 
-### Paso 6: Configurar Health Check en Target Group
+### Paso 6: Actualizar Security Groups
 
-6.1. Navega a **EC2** > **Target Groups**.
+Una vez creado el ALB, necesitas actualizar el security group de las tareas ECS para permitir tráfico solo desde el ALB.
 
-6.2. Selecciona el target group `my-webapp-tg`.
+6.1. Navega a **EC2** > **Security Groups** en la consola de AWS.
 
-6.3. Haz clic en la pestaña **"Health checks"**.
+6.2. Identifica el Security Group del ALB:
+   - Busca el SG asociado al Load Balancer `my-webapp-alb`
+   - Anota su ID (ejemplo: `sg-0abc123def456789`)
 
-6.4. Verifica o configura:
+6.3. Edita el Security Group de las tareas ECS (`ecs-tasks-sg`):
+   - Elimina la regla temporal si existe
+   - Añade una regla inbound:
+     - **Type**: `HTTP`
+     - **Port**: `80`
+     - **Source**: Security Group del ALB (selecciona el SG del paso 6.2)
+     - **Description**: `Allow traffic from ALB`
+
+6.4. Guarda los cambios.
+
+---
+
+### Paso 7: Configurar Health Check en Target Group
+
+7.1. Navega a **EC2** > **Target Groups**.
+
+7.2. Selecciona el target group `my-webapp-tg`.
+
+7.3. Haz clic en la pestaña **"Health checks"**.
+
+7.4. Verifica o configura:
    - **Protocol**: `HTTP`
-   - **Path**: `/`
+   - **Path**: `/health` (el nginx.conf tiene este endpoint configurado)
    - **Port**: `traffic port`
    - **Healthy threshold**: `2`
    - **Unhealthy threshold**: `3`
    - **Timeout**: `5 seconds`
    - **Interval**: `30 seconds`
+   - **Success codes**: `200`
 
-6.5. Haz clic en **"Save"**.
+7.5. Haz clic en **"Save"**.
+
+7.6. Verifica que los targets aparecen como **"healthy"** en la pestaña **"Targets"** (puede tomar 1-2 minutos).
 
 ---
 
-### Paso 7: Verificar el Deployment
+### Paso 8: Verificar el Deployment
 
-7.1. Obtén el DNS del Application Load Balancer:
+8.1. Obtén el DNS del Application Load Balancer:
    ```bash
    aws elbv2 describe-load-balancers --names my-webapp-alb --query 'LoadBalancers[0].DNSName' --output text
    ```
 
-7.2. Copia el DNS name y abre un navegador web.
+8.2. Copia el DNS name y abre un navegador web.
 
-7.3. Accede a la aplicación en: `http://<alb-dns-name>` (el ALB escucha en el puerto 80 y enruta al contenedor en el puerto 8000)
+8.3. Accede a la aplicación en: `http://<alb-dns-name>` (el ALB escucha en el puerto 80 y enruta al contenedor también en el puerto 80)
 
-   Deberías ver la página de bienvenida de tu aplicación web.
+   Deberías ver la página de bienvenida "AWS Academy - WebApp" con el badge "Lab 7.1".
 
-7.4. Verifica el estado del service en la consola de ECS:
+8.4. Verifica el estado del service en la consola de ECS:
    ```bash
    aws ecs describe-services --cluster my-cluster --services my-webapp-service --query 'services[0]'
    ```
 
-7.5. Verifica las tareas en ejecución:
+8.5. Verifica las tareas en ejecución:
    ```bash
    aws ecs list-tasks --cluster my-cluster --service-name my-webapp-service
    ```
 
-7.6. Opcional: Verifica los logs del contenedor:
+8.6. Verifica el endpoint de health check del contenedor directamente:
    ```bash
-   aws ecs describe-tasks --cluster my-cluster --tasks <task-arn> --query 'tasks[0].containers[0].logConfiguration'
+   curl http://<alb-dns-name>/health
    ```
+   Deberías ver la respuesta: `OK`
+
+8.7. Opcional: Verifica los logs del contenedor en CloudWatch:
+   - Navega a **CloudWatch** > **Log groups**
+   - Busca el log group `/ecs/my-webapp-task`
+   - Revisa los logs de los contenedores
 
 ---
 
@@ -244,13 +280,15 @@ En este paso crearás un ECS Service que mantendrárunning tus tareas y las dist
 Al finalizar este lab, debes poder confirmar que:
 
 - [ ] El repositorio ECR `my-webapp` fue creado exitosamente
-- [ ] La imagen Docker fue construida y subida a ECR correctamente
+- [ ] La imagen Docker fue construida con el comando correcto (`docker build -f docker/Dockerfile`) y subida a ECR
 - [ ] El cluster ECS `my-cluster` está en estado ACTIVE con Fargate
-- [ ] La task definition `my-webapp-task` fue creada con la imagen de ECR
+- [ ] La task definition `my-webapp-task` fue creada con la imagen de ECR y puerto 80 configurado
 - [ ] El service `my-webapp-service` tiene 2 tareas en estado RUNNING
-- [ ] El Application Load Balancer `my-webapp-alb` está activo
-- [ ] La aplicación es accesible via navegador en `http://<alb-dns>` (puerto 80)
-- [ ] El health check del target group muestra las tareas como HEALTHY
+- [ ] El Application Load Balancer `my-webapp-alb` está activo y escucha en puerto 80
+- [ ] Los Security Groups están correctamente configurados: ALB permite tráfico en puerto 80 desde Internet, tareas ECS permiten puerto 80 desde el SG del ALB
+- [ ] La aplicación es accesible via navegador en `http://<alb-dns>` y muestra "AWS Academy - WebApp"
+- [ ] El health check del target group (`/health`) muestra las tareas como HEALTHY
+- [ ] El endpoint `/health` responde con `OK` cuando se accede directamente
 
 ---
 
@@ -260,8 +298,8 @@ Al finalizar este lab, debes poder confirmar que:
 |-------|-------|----------|
 | `No Container Instances available` | El cluster usa EC2 pero no hay instancias registradas | Asegúrate de usar Fargate o lanzar instancias EC2 con el ECS agent |
 | `Image not found` | La URI de la imagen en ECR es incorrecta | Verifica que la imagen existe en ECR y la URI está bien escrita |
-| `Health check failed` | La aplicación no responde en el path configurado | Verifica que la aplicación escucha en el puerto correcto y responde a HTTP GET |
-| `Security group denied` | El security group no permite tráfico en el puerto | Edita el security group: inbound 80 para el ALB y 8000 desde el SG del ALB para las tareas ECS |
+| `Health check failed` | La aplicación no responde en el path configurado | Verifica que la aplicación escucha en puerto 80 y responde a HTTP GET en `/health` |
+| `Security group denied` | El security group no permite tráfico en el puerto | Edita los security groups: ALB permite 80 desde 0.0.0.0/0, tareas ECS permiten 80 desde el SG del ALB |
 | `Service failed to start` | Falta el rol IAM ecsTaskExecutionRole | Crea el rol IAM con la política AmazonECSTaskExecutionRolePolicy |
 | `Subnet has no routable Internet connection` | Las subnets privadas no tienen NAT Gateway | Asegúrate de que las subnets tengan ruta a Internet via NAT Gateway o VPC Endpoint |
 

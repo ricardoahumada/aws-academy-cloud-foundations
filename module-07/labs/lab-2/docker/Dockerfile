@@ -6,15 +6,15 @@
 # ============================================
 # Stage 1: Build
 # ============================================
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /build
 
 # Copiar package files
 COPY package*.json ./
 
-# Instalar dependencias
-RUN npm ci --only=production
+# Instalar dependencias (incluyendo devDependencies para el build)
+RUN npm ci
 
 # Copiar código fuente
 COPY src/ ./src/
@@ -26,7 +26,7 @@ RUN npm run build
 # ============================================
 # Stage 2: Production
 # ============================================
-FROM node:20-alpine AS production
+FROM node:22-alpine AS production
 
 # Crear usuario no-root
 RUN addgroup -g 1001 -S nodejs && \

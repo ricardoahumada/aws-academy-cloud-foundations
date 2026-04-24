@@ -24,9 +24,14 @@ spec:
           name: http
         env:
         - name: DATABASE_URL
-          value: "postgresql://db:5432/webapp"
+          value: "postgresql://dbuser@db:5432/webapp"
+        - name: DATABASE_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: app-secrets
+              key: DATABASE_PASSWORD
         - name: REDIS_URL
-          value: "redis://cache:6379"
+          value: "redis://cache:6379/0"
         - name: AWS_REGION
           value: "us-east-1"
         resources:

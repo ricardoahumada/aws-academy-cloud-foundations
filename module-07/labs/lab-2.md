@@ -1,4 +1,4 @@
-# Lab 7.2: Pipeline CI/CD para Imágenes con ECR y ECS
+# Lab 7.2: Pipeline CI/CD para Imágenes con ECR y ECS (OPCIONAL)
 
 ## Objetivo
 
@@ -46,6 +46,13 @@ Antes de crear el pipeline, necesitas un repositorio de código fuente y el arch
 
 1.2. Copia o clona tu aplicación web en este directorio.
 
+> **📁 Archivos de Referencia**: Este lab incluye archivos de ejemplo que puedes usar como plantilla:
+> - `lab-2/docker/Dockerfile` - Dockerfile multi-stage para Node.js
+> - `lab-2/docker/task-def.json` - Definición de contenedor para ECS  
+> - `lab-2/pipeline/buildspec.yml` - BuildSpec completo con deployment a ECS
+>
+> Puedes copiar estos archivos a tu repositorio o usarlos como referencia para crear los tuyos.
+
 1.3. Crea el archivo `buildspec.yml` en la raíz del proyecto:
    ```yaml
    version: 0.2
@@ -55,9 +62,10 @@ Antes de crear el pipeline, necesitas un repositorio de código fuente y el arch
        commands:
          - echo Logging in to Amazon ECR...
          - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-         - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-         - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/my-webapp
-         - IMAGE_TAG=$(date +%Y%m%d-%H%M%S)
+         - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+         - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+         - REPOSITORY_URI=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/my-webapp
+         - IMAGE_TAG=${CODEBUILD_BUILD_NUMBER:-latest}
      build:
        commands:
          - echo Build started on `date`
@@ -76,20 +84,33 @@ Antes de crear el pipeline, necesitas un repositorio de código fuente y el arch
    artifacts:
      files:
        - imagedefinitions.json
-       - '**/*'
-     base-directory: '.'
    ```
 
-1.4. Crea o copia el archivo `Dockerfile` de tu aplicación.
+   > **Nota**: Este buildspec simplificado permite que CodePipeline maneje el deployment automáticamente. Para un buildspec más completo que incluye actualización de task definition, consulta `lab-2/pipeline/buildspec.yml`.
 
-1.5. Inicializa git y configura:
+1.4. Crea o copia el archivo `Dockerfile` de tu aplicación en la raíz del proyecto.
+
+   > **Tip**: Puedes copiar el Dockerfile de ejemplo: `cp lab-2/docker/Dockerfile ./Dockerfile`
+
+1.5. Verifica la estructura de tu repositorio:
+   ```bash
+   # La estructura debe verse así:
+   webapp-cicd/
+   ├── Dockerfile
+   ├── buildspec.yml
+   ├── package.json
+   ├── src/
+   └── public/
+   ```
+
+1.6. Inicializa git y configura:
    ```bash
    git init
    git config --global user.name "Tu Nombre"
    git config --global user.email "tu@email.com"
    ```
 
-1.6. Haz el primer commit:
+1.7. Haz el primer commit:
    ```bash
    git add .
    git commit -m "Initial commit with Dockerfile and buildspec"
@@ -338,9 +359,32 @@ Al finalizar este lab, debes poder confirmar que:
 | `Build timeout` | El build tarda más de 60 minutos | Aumenta el timeout en la configuración del proyecto o optimiza el Dockerfile |
 | `Access denied error when pushing to ECR` | CodeBuild role sin permisos ECR | Adjunta la política AmazonECRAccessPolicy al service role |
 | `Image not found in task definition` | El archivo imagedefinitions.json no se generó | Verifica que el post_build genera este archivo correctamente |
-| `InvalidSignatureException` | Credenciales AWS expiradas o mal configuradas | Verifica que AWS_REGION y AWS_ACCOUNT_ID están definidos en buildspec |
+| `InvalidSignatureException` | Credenciales AWS expiradas o mal configuradas | Verifica que AWS_DEFAULT_REGION y AWS_ACCOUNT_ID están definidos en buildspec |
 | `Pipeline not triggering` | CloudWatch Events no configurado | Crea manualmente la regla de CloudWatch Events para el repositorio |
 | `Deploy stage failed` | Task definition no puede ser actualizada | Verifica que el service tiene el rol de ejecución correcto |
+| `docker: command not found` | El Dockerfile no está en la raíz del repo | Asegúrate de que el Dockerfile esté en la raíz, no en subcarpetas |
+| `No such file or directory: buildspec.yml` | buildspec.yml no está en la raíz | El buildspec.yml debe estar en la raíz del repositorio |
+
+---
+
+## Notas Importantes sobre la Estructura del Repositorio
+
+**Estructura esperada del repositorio `webapp-repo` en GitHub:**
+```
+webapp-repo/
+├── Dockerfile              # En la raíz (requerido)
+├── buildspec.yml           # En la raíz (requerido)
+├── package.json
+├── src/
+│   └── index.js
+└── public/
+    └── index.html
+```
+
+**⚠️ Importante**: 
+- El `Dockerfile` y `buildspec.yml` deben estar en la **raíz** del repositorio
+- No uses subcarpetas como `app/` o `docker/` en el repositorio GitHub
+- Los archivos en `lab-2/docker/` y `lab-2/pipeline/` son ejemplos para copiar, no para la estructura del repo
 
 ---
 
