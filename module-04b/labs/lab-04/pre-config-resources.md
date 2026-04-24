@@ -224,7 +224,6 @@ export const handler = async (event) => {
             createdAt: timestamp
         };
         
-        // ✅ Correcto: send(new PutCommand())
         await docClient.send(new PutCommand({
             TableName: ORDERS_TABLE,
             Item: order
